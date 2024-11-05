@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EM Autoprep System</title>
+    <script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+</head>
+<body>
+    <div class="main-container">
+        <!-- Left side - Content -->
+        <div class="content-area">
+            <h1 class="main-title">EM Autoprep System</h1>
+            <p class="main-subtitle">Welcome to the Electron Microscope Automation System</p>
+
+            <div class="navigation">
+                <button class="nav-btn" data-page="home">Home</button>
+                <button class="nav-btn" data-page="machine-test">Machine Test</button>
+                <button class="nav-btn" data-page="sem-tray">SEM Tray</button>
+                <button class="nav-btn" data-page="sem-stage">SEM Stage</button>
+                <button class="nav-btn" data-page="tem">TEM</button>
+                <button class="nav-btn terminal-toggle" id="terminal-toggle">Hide Terminal</button>
+            </div>
+            
+            <div id="page-content">
+                <!-- Dynamic content will be loaded here -->
+            </div>
+        </div>
+
+        <!-- Right side - Terminal -->
+        <div class="terminal-container">
+            <div class="terminal-header">
+                <span>Terminal Output</span>
+            </div>
+            <div id="terminal" class="terminal-content">
+                <div id="terminal-output"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

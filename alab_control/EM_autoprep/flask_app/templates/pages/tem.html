@@ -1,0 +1,26 @@
+<div class="form-card">
+    <h1>TEM Preparation</h1>
+    
+    <form id="temForm" onsubmit="event.preventDefault(); submitForm(this);">
+        <input type="hidden" name="function" value="process">
+        
+        <div class="form-group">
+            <label for="tem_voltage">TEM Voltage:</label>
+            <input type="text" id="tem_voltage" name="voltage" placeholder="Enter TEM voltage" value="200">
+            <small class="form-text text-muted">Range: 80-300 kV</small>
+        </div>
+
+        <div class="form-group">
+            <label for="tem_mode">Operation Mode:</label>
+            <select id="tem_mode" name="mode" class="form-control">
+                <option value="imaging">Imaging Mode</option>
+                <option value="diffraction">Diffraction Mode</option>
+                <option value="stem">STEM Mode</option>
+            </select>
+        </div>
+
+        <div class="button-group">
+            <button type="submit" class="btn btn-secondary">Start TEM Process</button>
+        </div>
+    </form>
+</div>
