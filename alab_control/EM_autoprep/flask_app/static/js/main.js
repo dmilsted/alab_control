@@ -132,7 +132,7 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(response => response.json())
         .then(data => {
             // Only display success message from the server response
-            addToTerminal(`Success: ${data.message}`);
+            addToTerminal(`Response: ${data.message}`);
         })
         .catch(error => {
             console.error('Error:', error);
@@ -157,7 +157,7 @@ function submitForm(form) {
     })
     .then(response => response.json())
     .then(data => {
-        console.log('Success:', data);
+        console.log('Response:', data);
         addToTerminal(data.message);
     })
     .catch(error => {
