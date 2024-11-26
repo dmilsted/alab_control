@@ -7,6 +7,7 @@ from alab_control.ender3 import Ender3
 import subprocess
 import csv
 import os
+import time
 
 app = Flask(__name__)
 socketio = SocketIO(app, async_mode='threading')  # Important: Specify async_mode
@@ -18,7 +19,7 @@ udp_port = 8001
 server_ip = "142.251.214.142" #change to server's IP. This is google :)
 plc_ip = '192.168.0.46'
 plc_port = 8888
-c3dp_com_port = "COM6"
+c3dp_com_port = "/dev/cu.usbmodem112401"
 
 # Define numeric values for linear actuators
 sem_stage_opened = "015"
@@ -30,12 +31,60 @@ tem_grid_holder_closed = "180"
 # Defined 3D printer constants for safe operation - be careful when changing or the machine might break
 MEASURED_BASE_HEIGHT = 71 #71 is the measured value that David measured
 MAX_EXPOSURE_DISTANCE = 25.0
-CRUCIBLE_HEIGHT = 39
 SPEED_VLOW = 0.005
 SPEED_LOW = 0.02
 SPEED_NORMAL = 0.5
 PAUSE = 2
 PAUSE_VAC = 11
+
+# CSV files management variables
+CWD = os.getcwd()
+positions = {}
+path = CWD + '/EM_autoprep/Positions/'
+clean_disks_filename = 'disks_tray_clean.csv'
+used_disks_filename = 'disks_tray_used.csv'
+equipment_filename = 'equipment.csv'
+intermediate_positions_filename = 'intermediate_positions.csv'
+phenom_holder_positions_filename = 'phenom_stubs.csv'
+phenom_handler_filename = 'phenom_handler.csv'
+stubs_tray_filename = 'stubs_tray.csv'
+
+def float_or_none(s):
+  if s == 'None':
+    return None
+  return float(s)
+
+def read_CSV_into_positions(path): 
+  with open(path, mode ='r') as file:
+    csvFile = csv.reader(file)
+    for lines in csvFile:
+      #Each line has a list of 4 arguments, argument 0 is the name of the position, and argument 1, 2, 3 correspond to x, y, z, respectively
+      positions[lines[0]] = ((float_or_none(lines[1]), float_or_none(lines[2]), float_or_none(lines[3])))
+  return positions
+
+class SamplePrepEnder3(Ender3):
+    # positions
+    clean_disk_pos = read_CSV_into_positions(
+        path=path + clean_disks_filename
+    )
+    used_disk_pos = read_CSV_into_positions(
+        path=path + used_disks_filename
+    )
+    equipment_pos = read_CSV_into_positions(
+        path=path + equipment_filename
+    )
+    intermediate_pos = read_CSV_into_positions(
+        path=path + intermediate_positions_filename
+    )
+    used_stub_pos = read_CSV_into_positions(
+        path=path + phenom_holder_positions_filename
+    )
+    phenom_handler_pos = read_CSV_into_positions(
+        path=path + phenom_handler_filename
+    )
+    clean_stub_pos = read_CSV_into_positions(
+        path=path + stubs_tray_filename
+    )
 
 # Define action functions
 def send_plc_command(message):
@@ -67,10 +116,7 @@ def button_action(button_id):
     print(f"Button action called for {button_id}")
     return f"Button action performed for {button_id}"
 
-def c3dp_test_connectivity(complete_test=True):
-    class SamplePrepEnder3(Ender3):
-        pass
-
+def c3dp_test_connectivity(complete_test=False):
     try:
         r = SamplePrepEnder3(c3dp_com_port)
         result = "3D Printer connection established and working well."
@@ -83,6 +129,7 @@ def c3dp_test_connectivity(complete_test=True):
                 result += f"{p}\n\n"
         else:
             result = "It was not possible to connect to the printer. Test the connectivity on the machine test page."
+        print(result)
         return False, result
 
 def ping(ping_ip):
@@ -100,7 +147,6 @@ def ping(ping_ip):
         return f"An error occurred while pinging {ping_ip}: {str(e)}"
 
 def server_test_connectivity():
-    #ping(server_ip)
     return ping(server_ip)
 
 def c3dp_test_connectivity_machine_test_page():
@@ -124,26 +170,154 @@ def control_panel_tem_grid_holder_open():
 def control_panel_tem_grid_holder_close():
     return send_plc_command(f"TEMPREPL{tem_grid_holder_closed}")
 
-def sem_process_action(voltage, c_height, distance, time, origin, destination):
-    print(f"SEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={time}, origin={origin}, destination={destination}")
-    socketio.emit('function_response', {'result': f"SEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={time}, origin={origin}, destination={destination}"})
-    # Test connectivity with a simple message
-    success, connectivity_result = c3dp_test_connectivity(complete_test=False)
-    
-    # Check if the connectivity test passed
-    if success:
-        # Connectivity test passed, perform the home command
-        class SamplePrepEnder3(Ender3):
-            pass
-        
-        r = SamplePrepEnder3(c3dp_com_port)
-        r.gohome()
+def control_panel_laser_status():
+    return send_plc_command("SEMPREPTEST")
 
+def control_panel_hvps_setting(v,t):
+    return send_plc_command(f"EXPOSURV{v}T{t}")
+
+def control_panel_vacuum(destination,status=False):
+    if destination == "SEM":
+        if status:
+            send_plc_command("SEMPREPVAC1")
+        else:
+            send_plc_command("STANDBY")
+    if destination == "TEM":
+        if status:
+            send_plc_command("TEMPREPVAC1")
+        else:
+            send_plc_command("STANDBY")
+
+def device_step_zero():
+    success, connectivity_result = c3dp_test_connectivity(complete_test=False)
+    if success:
+        r = SamplePrepEnder3(c3dp_com_port)
+        try:
+            r.gohome()
+        except Exception as var_error:
+            print(f"An error occurred: {var_error}")
+            socketio.emit("An error occurred: {var_error}")  # Assuming this emits the error message to the client
+            return False  # Return False to indicate failure
     else:
         # Connectivity test failed, return the error message
+        socketio.emit(connectivity_result)
         return connectivity_result
-    return 
-    #f"SEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={time}, origin={origin}, destination={destination}"
+
+    control_panel_standby()  # This will only run if no exceptions occurred
+    return True  # Return True to indicate success
+
+def device_step_final():
+    r = SamplePrepEnder3(c3dp_com_port)
+    r.moveto(*r.intermediate_pos["ZHOME"])
+    r.gohome()
+    control_panel_shutdown()
+    return
+
+def device_extend_bed():
+    print("3DP bed extension requested.")
+    socketio.emit('function_response', {'result': "3DP bed extension requested."})
+    r = SamplePrepEnder3(c3dp_com_port)
+    if device_step_zero():
+        r.speed = SPEED_NORMAL
+        r.moveto(*r.intermediate_pos["BED_EXTENDED"])
+        print("3DP bed extended")
+        socketio.emit('function_response', {'result': "3DP bed extended."})
+    else:
+        print("3DP bed couldn't be extended.")
+        socketio.emit('function_response', {'result': "3DP bed couldn't be extended."})
+    return
+
+def sem_process_action(voltage, c_height, distance, etime, origin, destination):
+    print(f"SEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}")
+    socketio.emit('function_response', {'result': f"SEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}"})
+    r = SamplePrepEnder3(c3dp_com_port)
+
+    # TODO: The code should test each received variable. e.g., if distance is not beiond safety, if origin and destination exists, etc.
+
+    if device_step_zero():
+        r.speed = SPEED_NORMAL
+        r.moveto(*r.intermediate_pos["ZHOME"])
+        print(f"Collecting stub from {origin}")
+        socketio.emit('function_response', {'result': f"Collecting stub from {origin}."})
+
+        stub_pick_trials = 0
+        stub_picked = False
+        control_panel_vacuum("SEM",True)
+        while True:
+            if stub_pick_trials > 2:
+                print("Stub not picked 3 times in a row. Aborted.")
+                socketio.emit('function_response', {'result': "Stub not picked 3 times in a row. Aborted."})
+                break
+            else:
+                print("Trying to pick the stub...")
+                socketio.emit('function_response', {'result': "Trying to pick the stub..."})
+
+            r.moveto(*r.clean_stub_pos[origin])
+            # Descending needle
+            r.moveto(*r.clean_stub_pos["STRAY_Z1"])
+            r.speed = SPEED_LOW
+            
+            # Descending needle, slower speed
+            r.moveto(*r.clean_stub_pos["STRAY_Z2"])
+            r.speed = SPEED_VLOW
+            
+            # Trying to collect stub delicately
+            r.moveto(*r.clean_stub_pos["STRAY_Z3"])
+            r.moveto(*r.clean_stub_pos["STRAY_Z2"])
+            r.speed = SPEED_NORMAL
+            r.moveto(*r.intermediate_pos["ZHOME"])
+            print("Checking if stub was picked...")
+            socketio.emit('function_response', {'result': "Checking if stub was picked..."})
+            r.moveto(*r.equipment_pos["LASER"])
+            r.moveto(*r.equipment_pos["LASER_Z1"])
+
+            if control_panel_laser_status() == "LASER1":
+            #if True: #for debugging, delete!
+                print("Stub was picked!")
+                socketio.emit('function_response', {'result': "Stub was picked!"})
+                stub_picked = True
+                r.moveto(*r.intermediate_pos["ZHOME"])
+                break
+            else:
+                print("Stub was not detected. Trying again...")
+                socketio.emit('function_response', {'result': ".Stub was not detected. Trying again..."})
+                r.moveto(*r.intermediate_pos["ZHOME"])
+                control_panel_vacuum("SEM",False)
+                stub_pick_trials = stub_pick_trials+1
+
+        if stub_picked:
+            r.moveto(*r.intermediate_pos["ZHOME"])
+            r.moveto(*r.intermediate_pos["CHARGER"])
+            r.moveto(z=MEASURED_BASE_HEIGHT - int(c_height))
+
+            #TODO: check if the exposition heights make sense. It seems it is reversed (going up when it should go down, and vice -versa)
+            socketio.emit('function_response', {'result': f"Setting at: {MEASURED_BASE_HEIGHT - int(c_height)} mm."})
+            r.moveto(z=MEASURED_BASE_HEIGHT -  int(c_height) + int(distance))
+            socketio.emit('function_response', {'result': f"Exposing at: {MEASURED_BASE_HEIGHT - int(c_height) + int(distance)} mm."})
+            print(f"Stub will be exposed to {voltage} kV for {etime} ms.")
+            socketio.emit('function_response', {'result': f"Stub will be exposed to {voltage} kV for {etime} ms."})
+            control_panel_hvps_setting(voltage,etime)
+            time.sleep(int(etime)/1000+2)
+            r.moveto(*r.intermediate_pos["ZHOME"])
+            
+            print(f"Delivering stub to {origin}.")
+            socketio.emit('function_response', {'result': f"Delivering stub to {origin}."})
+            r.moveto(*r.clean_stub_pos[origin])
+            r.moveto(*r.clean_stub_pos["STRAY_Z1"])
+            r.speed = SPEED_LOW
+            r.moveto(*r.clean_stub_pos["STRAY_Z2"])
+            r.speed = SPEED_VLOW
+            r.moveto(*r.clean_stub_pos["STRAY_Z3"])
+            control_panel_vacuum("SEM",False)
+            time.sleep(PAUSE_VAC)
+            r.moveto(*r.clean_stub_pos["STRAY_Z2"])
+            r.speed = SPEED_NORMAL
+            r.moveto(*r.intermediate_pos["ZHOME"])
+
+        device_step_final()
+
+    return
+
 
 # Map function names to handlers
 function_map = {
@@ -157,7 +331,8 @@ function_map = {
     'control_panel_sem_stage_open': control_panel_sem_stage_open,
     'control_panel_sem_stage_close': control_panel_sem_stage_close,
     'control_panel_tem_grid_holder_open': control_panel_tem_grid_holder_open,
-    'control_panel_tem_grid_holder_close': control_panel_tem_grid_holder_close
+    'control_panel_tem_grid_holder_close': control_panel_tem_grid_holder_close,
+    'device_extend_bed': device_extend_bed
 }
 
 @app.route('/get_page/<page>')
@@ -170,8 +345,8 @@ def get_page(page):
         return render_template('pages/sem_tray.html')
     elif page == 'sem-stage':
         return render_template('pages/sem_stage.html')
-    elif page == 'tem':
-        return render_template('pages/tem.html')
+    elif page == 'tem-tray':
+        return render_template('pages/tem_tray.html')
     else:
         return f"Page not found: {page}", 404
 
@@ -187,9 +362,9 @@ def sem_tray_page():
 def sem_stage_page():
     return render_template('sem_stage.html')
 
-@app.route('/tem')
+@app.route('/tem_tray')
 def tem_page():
-    return render_template('tem.html')
+    return render_template('tem_tray.html')
 
 @socketio.on('call_function')
 def handle_socket_function(data):
@@ -228,7 +403,7 @@ def dispatch_action(data):
                 voltage=data.get('voltage'),
                 c_height=data.get('c_height'),
                 distance=data.get('distance'),
-                time=data.get('time'),
+                etime=data.get('time'),
                 origin=data.get('origin'),
                 destination=data.get('destination')
             )
@@ -249,6 +424,8 @@ def dispatch_action(data):
         elif function_type == 'control_panel_tem_grid_holder_open':
             return action_function()
         elif function_type == 'control_panel_tem_grid_holder_close':
+            return action_function()
+        elif function_type == 'device_extend_bed':
             return action_function()
         else:
             return "Function type not supported"

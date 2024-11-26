@@ -249,3 +249,58 @@ input[type="text"]:focus {
     margin-bottom: 10px;
     color: #555;
 }
+
+/* Style the form group container for the select */
+.form-group label[for="origin"] {
+    display: block;  /* Makes the label appear above the select */
+    margin-bottom: 5px; /* Adds some space between label and select */
+}
+
+.form-group select {
+    width: 100%;       /* Makes the select take full width of its container */
+    padding: 8px 12px;   /* Adds padding inside the select */
+    border: 1px solid #ccc; /* Adds a border */
+    border-radius: 4px;    /* Rounds the corners a bit */
+    box-sizing: border-box; /* Includes padding and border in the element's total width and height */
+    appearance: none;       /* Removes default dropdown arrow styling (important for custom styling) */
+    background-color: #fff;  /* Sets white background */
+    /* Add a custom dropdown arrow (optional) */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='currentColor' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E"); /* This is the SVG for a chevron-down icon, but you can customize it */
+    background-repeat: no-repeat;
+    background-position: right 10px center; /* Adjust position as needed */
+    background-size: 16px 16px;
+}
+
+.form-group select:focus {
+    outline: none;       /* Removes default outline on focus */
+    border-color: #007bff; /* Changes border color on focus (optional) */
+}
+
+
+/* General form styling (if needed) */
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-card {
+  padding: 20px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  margin-bottom: 20px; /* Add spacing between cards */
+}
+
+
+.main-container {
+    display: flex;           /* Make the container a flexbox */
+    justify-content: center; /* Center items horizontally */
+    align-items: flex-start;  /* Align items to the top */
+    gap: 20px;              /* Add some spacing between items */ /* Adjust as needed */
+    padding: 20px;
+}
+
+@media (max-width: 768px) { /* Example media query for responsive design */
+    .main-container {
+        flex-direction: column; /* Stack items vertically on smaller screens */
+        align-items: center; /* Center items horizontally */
+    }
+}

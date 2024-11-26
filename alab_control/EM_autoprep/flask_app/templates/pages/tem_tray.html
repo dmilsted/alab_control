@@ -1,0 +1,258 @@
+<div class="form-card">
+    <h1 class="main-title">TEM Tray Preparation</h1>
+</div>
+
+<div class="main-container">
+    <div class="form-card" style="margin-right: 10px;">
+        <h2 class="main-subtitle">Preparation parameters</h2>
+
+        <form id="temTrayForm" onsubmit="event.preventDefault(); submitForm(this);">
+            <input type="hidden" name="function" value="tem_process">
+
+            <div class="form-group">
+                <label for="voltage">Exposure Voltage:</label>
+                <input type="text" id="voltage" name="voltage" placeholder="Enter exposure voltage (ms)" value="10000">
+                <small class="form-text text-muted">Minimum: 1000, Maximum: 25000</small>
+            </div>
+
+            <div class="form-group">
+                <label for="c_height">Container height:</label>
+                <input type="text" id="c_height" name="c_height" placeholder="Enter container height (mm)" value="39">
+                <small class="form-text text-muted">Values in mm.</small>
+            </div>
+
+            <div class="form-group">
+                <label for="distance">Vertical shift:</label>
+                <input type="text" id="distance" name="distance" placeholder="Enter Vertical shift distance (mm)"
+                    value="18">
+                <small class="form-text text-muted">Values in mm. Lowest: -25.0, Highest: 25.0</small>
+            </div>
+
+            <div class="form-group">
+                <label for="time">Exposure Time:</label>
+                <input type="text" id="time" name="time" placeholder="Enter exposure time (ms)" value="5000">
+                <small class="form-text text-muted">Minimum: 0, Maximum: 9999</small>
+            </div>
+
+            <div class="form-group">
+                <label for="origin">Origin:</label>
+                <select id="origin" name="origin" onchange="updateTEMDestinationAndHighlight(this.value)">
+                    <option value="TC1">TC1</option>
+                    <option value="TC2">TC2</option>
+                    <option value="TC3">TC3</option>
+                    <option value="TC4">TC4</option>
+                    <option value="TC5">TC5</option>
+                    <option value="TC6">TC6</option>
+                    <option value="TC7">TC7</option>
+                    <option value="TC8">TC8</option>
+                    <option value="TC9">TC9</option>
+                    <option value="TC10">TC10</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="destination">Destination:</label>
+                <select id="destination" name="destination" onchange="updateTEMDestinationAndHighlight(this.value)">
+                    <option value="TE1">TE1</option>
+                    <option value="TE2">TE2</option>
+                    <option value="TE3">TE3</option>
+                    <option value="TE4">TE4</option>
+                    <option value="TE5">TE5</option>
+                    <option value="TE6">TE6</option>
+                    <option value="TE7">TE7</option>
+                    <option value="TE8">TE8</option>
+                    <option value="TE9">TE9</option>
+                    <option value="TE10">TE10</option>
+                </select>
+            </div>
+
+            <div class="button-group">
+                <button type="submit" class="btn btn-secondary">Prepare Sample</button>
+            </div>
+        </form>
+    </div>
+    <div class="form-card" style="margin-left: 10px;">
+        <h2 class="main-subtitle">Tray Positions</h2>
+        <svg width="510" height="510" xmlns="http://www.w3.org/2000/svg">
+
+            <style>
+                svg {
+                    border: 2px solid black;
+                    /* Same border thickness as before */
+                }
+
+                text {
+                    font-family: Arial, sans-serif;
+                    font-size: 12px;
+                    /* Default font size for regular text */
+                    text-anchor: middle;
+                    dominant-baseline: middle;
+                }
+
+                .large-text {
+                    font-size: 45px;
+                    /* Larger font size for "NOT AVAILABLE" */
+                    fill: red;
+                    /* Red fill color */
+                    stroke: white;
+                    /* White stroke for outline */
+                    stroke-width: 1;
+                    /* Thickness of the white outline */
+                }
+            </style>
+
+
+            <!-- Equilateral triangle in the top-right corner -->
+            <polygon points="510,0 460,0 510,50" fill="black" />
+
+            <!-- Row 1 -->
+            <rect id="S1_1" x="30" y="30" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S1_2" x="75" y="30" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S1_3" x="120" y="30" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S1_4" x="165" y="30" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S1_5" x="210" y="30" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S1_6" x="255" y="30" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S1_7" x="300" y="30" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S1_8" x="345" y="30" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S1_9" x="390" y="30" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S1_10" x="435" y="30" width="35" height="35" fill="white" stroke="black" />
+
+            <!-- Row 2 -->
+            <rect id="S2_1" x="30" y="75" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S2_2" x="75" y="75" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S2_3" x="120" y="75" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S2_4" x="165" y="75" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S2_5" x="210" y="75" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S2_6" x="255" y="75" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S2_7" x="300" y="75" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S2_8" x="345" y="75" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S2_9" x="390" y="75" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S2_10" x="435" y="75" width="35" height="35" fill="white" stroke="black" />
+
+            <!-- Row 3 -->
+            <rect id="S3_1" x="30" y="120" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S3_2" x="75" y="120" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S3_3" x="120" y="120" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S3_4" x="165" y="120" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S3_5" x="210" y="120" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S3_6" x="255" y="120" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S3_7" x="300" y="120" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S3_8" x="345" y="120" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S3_9" x="390" y="120" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S3_10" x="435" y="120" width="35" height="35" fill="white" stroke="black" />
+
+            <!-- Row 4 -->
+            <rect id="S4_1" x="30" y="165" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S4_2" x="75" y="165" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S4_3" x="120" y="165" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S4_4" x="165" y="165" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S4_5" x="210" y="165" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S4_6" x="255" y="165" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S4_7" x="300" y="165" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S4_8" x="345" y="165" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S4_9" x="390" y="165" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S4_10" x="435" y="165" width="35" height="35" fill="white" stroke="black" />
+
+            <!-- Row 5 -->
+            <rect id="S5_1" x="30" y="210" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S5_2" x="75" y="210" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S5_3" x="120" y="210" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S5_4" x="165" y="210" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S5_5" x="210" y="210" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S5_6" x="255" y="210" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S5_7" x="300" y="210" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S5_8" x="345" y="210" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S5_9" x="390" y="210" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S5_10" x="435" y="210" width="35" height="35" fill="white" stroke="black" />
+
+            <!-- Row 6 -->
+            <rect id="S6_1" x="30" y="255" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S6_2" x="75" y="255" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S6_3" x="120" y="255" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S6_4" x="165" y="255" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S6_5" x="210" y="255" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S6_6" x="255" y="255" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S6_7" x="300" y="255" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S6_8" x="345" y="255" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S6_9" x="390" y="255" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S6_10" x="435" y="255" width="35" height="35" fill="white" stroke="black" />
+
+            <!-- Row 7 -->
+            <rect id="S7_1" x="30" y="300" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S7_2" x="75" y="300" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S7_3" x="120" y="300" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S7_4" x="165" y="300" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S7_5" x="210" y="300" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S7_6" x="255" y="300" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S7_7" x="300" y="300" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S7_8" x="345" y="300" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S7_9" x="390" y="300" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S7_10" x="435" y="300" width="35" height="35" fill="white" stroke="black" />
+
+            <!-- Row 8 -->
+            <rect id="S8_1" x="30" y="345" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S8_2" x="75" y="345" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S8_3" x="120" y="345" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S8_4" x="165" y="345" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S8_5" x="210" y="345" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S8_6" x="255" y="345" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S8_7" x="300" y="345" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S8_8" x="345" y="345" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S8_9" x="390" y="345" width="35" height="35" fill="white" stroke="black" />
+            <rect id="S8_10" x="435" y="345" width="35" height="35" fill="white" stroke="black" />
+            <!-- "Not Available" alert -->
+            <rect x="25" y="25" width="450" height="360" fill="red" opacity="0.8" />
+
+
+            <text x="255" y="210" class="large-text">
+                NOT AVAILABLE
+            </text>
+
+            <!-- Row 9 (TC1 to TC10) -->
+            <rect id="TC1" x="30" y="390" width="35" height="35" fill="lightgreen" stroke="black" />
+            <text x="47.5" y="412.5">TC1</text>
+            <rect id="TC2" x="75" y="390" width="35" height="35" fill="white" stroke="black" />
+            <text x="92.5" y="412.5">TC2</text>
+            <rect id="TC3" x="120" y="390" width="35" height="35" fill="white" stroke="black" />
+            <text x="137.5" y="412.5">TC3</text>
+            <rect id="TC4" x="165" y="390" width="35" height="35" fill="white" stroke="black" />
+            <text x="182.5" y="412.5">TC4</text>
+            <rect id="TC5" x="210" y="390" width="35" height="35" fill="white" stroke="black" />
+            <text x="227.5" y="412.5">TC5</text>
+            <rect id="TC6" x="255" y="390" width="35" height="35" fill="white" stroke="black" />
+            <text x="272.5" y="412.5">TC6</text>
+            <rect id="TC7" x="300" y="390" width="35" height="35" fill="white" stroke="black" />
+            <text x="317.5" y="412.5">TC7</text>
+            <rect id="TC8" x="345" y="390" width="35" height="35" fill="white" stroke="black" />
+            <text x="362.5" y="412.5">TC8</text>
+            <rect id="TC9" x="390" y="390" width="35" height="35" fill="white" stroke="black" />
+            <text x="407.5" y="412.5">TC9</text>
+            <rect id="TC10" x="435" y="390" width="35" height="35" fill="white" stroke="black" />
+            <text x="452.5" y="412.5">TC10</text>
+
+            <!-- Row 10 (TE1 to TE10) -->
+            <rect id="TE1" x="30" y="435" width="35" height="35" fill="lightblue" stroke="black" />
+            <text x="47.5" y="457.5">TE1</text>
+            <rect id="TE2" x="75" y="435" width="35" height="35" fill="white" stroke="black" />
+            <text x="92.5" y="457.5">TE2</text>
+            <rect id="TE3" x="120" y="435" width="35" height="35" fill="white" stroke="black" />
+            <text x="137.5" y="457.5">TE3</text>
+            <rect id="TE4" x="165" y="435" width="35" height="35" fill="white" stroke="black" />
+            <text x="182.5" y="457.5">TE4</text>
+            <rect id="TE5" x="210" y="435" width="35" height="35" fill="white" stroke="black" />
+            <text x="227.5" y="457.5">TE5</text>
+            <rect id="TE6" x="255" y="435" width="35" height="35" fill="white" stroke="black" />
+            <text x="272.5" y="457.5">TE6</text>
+            <rect id="TE7" x="300" y="435" width="35" height="35" fill="white" stroke="black" />
+            <text x="317.5" y="457.5">TE7</text>
+            <rect id="TE8" x="345" y="435" width="35" height="35" fill="white" stroke="black" />
+            <text x="362.5" y="457.5">TE8</text>
+            <rect id="TE9" x="390" y="435" width="35" height="35" fill="white" stroke="black" />
+            <text x="407.5" y="457.5">TE9</text>
+            <rect id="TE10" x="435" y="435" width="35" height="35" fill="white" stroke="black" />
+            <text x="452.5" y="457.5">TE10</text>
+
+        </svg>
+
+    </div>
+</div>

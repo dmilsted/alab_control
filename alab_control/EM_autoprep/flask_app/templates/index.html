@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>EM Autoprep System</title>
     <script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
 </head>
@@ -19,8 +20,8 @@
                 <button class="nav-btn" data-page="home">Home</button>
                 <button class="nav-btn" data-page="machine-test">Machine Test</button>
                 <button class="nav-btn" data-page="sem-tray">SEM Tray</button>
-                <button class="nav-btn" data-page="sem-stage">SEM Stage</button>
-                <button class="nav-btn" data-page="tem">TEM</button>
+                <button class="nav-btn" data-page="sem-stage" style="display: none;">SEM Stage</button>
+                <button class="nav-btn" data-page="tem-tray">TEM tray</button>
                 <button class="nav-btn terminal-toggle" id="terminal-toggle">Hide Terminal</button>
             </div>
             

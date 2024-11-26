@@ -1,0 +1,25 @@
+Each of the Position files contain positioning information for the printer head and bed for various tasks as described below.
+
+== Sample holders ==
+These files contain the positioning information that match each position inside a tray or the Phenom stage, and also some Z positions that are used to pick
+and place the holders with different speeds, allowing a more accurate and safe operation.
+Clean SEM stubs and TEM grids positions are listed in the files:
+- Stubs_tray.csv
+- Disks_tray_clean.csv
+
+While exposed/used SEM stubs and TEM grids positions are listed in the files:
+- Disks_tray_used.csv
+- Phenom_stubs.csv
+Obs: the user might request that a SEM stub goes back to the tray. In that case, obviously, the tray would hold a not-clean stub.
+
+== Equipment and Safe Operation ==
+These files contain important positioning information that allow the machine to operate safely and to use its internal pieces (equipment):
+- Equipment.csv
+- Intermediate_positions.csv
+Some equipment need the head to stay in a "home" position for that specific equipment. They are called intermediate positions and are used
+for safe operation since the machine should not move the bed while the head is low. Each equipment might have many Z positions to operate safely,
+as they allow the usage of different speeds to accomplish a task more safely and/or accurately. Regarding material receipt and delivery, the
+machine needs to extend the bed to receive and deliver materials and samples, and this movement can only happen with the head z-homed.
+
+
+The file "phenom_handler.csv"  might not be necessary and its exclusion is being considered.

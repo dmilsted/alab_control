@@ -1,10 +1,14 @@
+<div class="form-card">
+    <h1 class="main-title">SEM Tray Preparation</h1>
+</div>
+
 <div class="main-container">
-    <div class="form-card">
-        <h1>SEM Tray Preparation</h1>
-        
+    <div class="form-card" style="margin-right: 20px;">
+        <h2 class="main-subtitle">Preparation parameters</h2>
+
         <form id="semTrayForm" onsubmit="event.preventDefault(); submitForm(this);">
             <input type="hidden" name="function" value="sem_process">
-            
+
             <div class="form-group">
                 <label for="voltage">Exposure Voltage:</label>
                 <input type="text" id="voltage" name="voltage" placeholder="Enter exposure voltage (ms)" value="10000">
@@ -16,13 +20,14 @@
                 <input type="text" id="c_height" name="c_height" placeholder="Enter container height (mm)" value="39">
                 <small class="form-text text-muted">Values in mm.</small>
             </div>
-            
+
             <div class="form-group">
                 <label for="distance">Vertical shift:</label>
-                <input type="text" id="distance" name="distance" placeholder="Enter Vertical shift distance (mm)" value="18">
+                <input type="text" id="distance" name="distance" placeholder="Enter Vertical shift distance (mm)"
+                    value="18">
                 <small class="form-text text-muted">Values in mm. Lowest: -25.0, Highest: 25.0</small>
             </div>
-            
+
             <div class="form-group">
                 <label for="time">Exposure Time:</label>
                 <input type="text" id="time" name="time" placeholder="Enter exposure time (ms)" value="5000">
@@ -30,24 +35,83 @@
             </div>
 
             <div class="form-group">
-                <label for="origin">Origin Position:</label>
-                <input type="text" id="origin" name="origin" placeholder="Enter origin position" value="A1">
+                <label for="origin">Origin and Destination:</label>
+                <select id="origin" name="origin" onchange="updateSEMDestinationAndHighlight(this.value)">
+                    <option value="A1">A1</option>
+                    <option value="A2">A2</option>
+                    <option value="A3">A3</option>
+                    <option value="B1">B1</option>
+                    <option value="B2">B2</option>
+                    <option value="B3">B3</option>
+                    <option value="C1">C1</option>
+                    <option value="C2">C2</option>
+                    <option value="C3">C3</option>
+                    <option value="D1">D1</option>
+                    <option value="D2">D2</option>
+                    <option value="D3">D3</option>
+                    <option value="E1">E1</option>
+                    <option value="E2">E2</option>
+                    <option value="E3">E3</option>
+                </select>
             </div>
 
-            <div class="form-group">
-                <label for="destination">Destination Position:</label>
-                <input type="text" id="destination" name="destination" placeholder="Enter destination position" value="A1">
-            </div>
-
-            
+            <!-- Hidden Destination Field -->
+            <input type="hidden" id="destination" name="destination" value="A1">
 
             <div class="button-group">
                 <button type="submit" class="btn btn-secondary">Prepare Sample</button>
             </div>
         </form>
     </div>
-    <div class="form-card">
-        <h2>SEM Tray Positions</h2>
-        <img src="{{ url_for('static', filename='images/sem_tray_positions.png') }}" alt="SEM Tray Positions">
+    <div class="form-card" style="margin-left: 20px;">
+        <h2 class="main-subtitle">Tray Positions</h2>
+        <svg id="svgContainer" width="300" height="380" xmlns="http://www.w3.org/2000/svg">
+            <rect width="290" height="370" x="5" y="5" fill="none" stroke="black" stroke-width="2" rx="15" ry="15" />
+            <rect width="20" height="20" x="140" y="5" fill="black" />
+
+            <style>
+                text {
+                    font-family: Arial, sans-serif;
+                    font-size: 12px;
+                    text-anchor: middle;
+                    dominant-baseline: middle;
+                }
+            </style>
+
+            <circle id="E1" cx="50" cy="70" r="25" fill="white" stroke="black" />
+            <text x="50" y="70">E1</text>
+            <circle id="E2" cx="150" cy="70" r="25" fill="white" stroke="black" />
+            <text x="150" y="70">E2</text>
+            <circle id="E3" cx="250" cy="70" r="25" fill="white" stroke="black" />
+            <text x="250" y="70">E3</text>
+
+            <circle id="D1" cx="50" cy="135" r="25" fill="white" stroke="black" />
+            <text x="50" y="135">D1</text>
+            <circle id="D2" cx="150" cy="135" r="25" fill="white" stroke="black" />
+            <text x="150" y="135">D2</text>
+            <circle id="D3" cx="250" cy="135" r="25" fill="white" stroke="black" />
+            <text x="250" y="135">D3</text>
+
+            <circle id="C1" cx="50" cy="200" r="25" fill="white" stroke="black" />
+            <text x="50" y="200">C1</text>
+            <circle id="C2" cx="150" cy="200" r="25" fill="white" stroke="black" />
+            <text x="150" y="200">C2</text>
+            <circle id="C3" cx="250" cy="200" r="25" fill="white" stroke="black" />
+            <text x="250" y="200">C3</text>
+
+            <circle id="B1" cx="50" cy="265" r="25" fill="white" stroke="black" />
+            <text x="50" y="265">B1</text>
+            <circle id="B2" cx="150" cy="265" r="25" fill="white" stroke="black" />
+            <text x="150" y="265">B2</text>
+            <circle id="B3" cx="250" cy="265" r="25" fill="white" stroke="black" />
+            <text x="250" y="265">B3</text>
+
+            <circle id="A1" cx="50" cy="330" r="25" fill="lightgreen" stroke="black" />
+            <text x="50" y="330">A1</text>
+            <circle id="A2" cx="150" cy="330" r="25" fill="white" stroke="black" />
+            <text x="150" y="330">A2</text>
+            <circle id="A3" cx="250" cy="330" r="25" fill="white" stroke="black" />
+            <text x="250" y="330">A3</text>
+        </svg>
     </div>
 </div>
