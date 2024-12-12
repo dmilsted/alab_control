@@ -185,7 +185,7 @@ def control_panel_hvps_setting(v,t):
 def control_panel_vacuum(destination,status=False):
     if destination == "SEM":
         if status:
-            send_plc_command("SEMPREPVAC1")
+            send_plc_command("TEMPREPVAC1") #temporarily set to TEM pump due to the SEM one being broken right now
         else:
             send_plc_command("STANDBY")
     if destination == "TEM":
@@ -217,9 +217,11 @@ def device_step_final(r):
         r.moveto(*r.intermediate_pos["ZHOME"])
         r.gohome()
         control_panel_shutdown()
+        socketio.emit('function_response', {'result': "Device shutdown completed successfully."})
     except Exception as e:
-        print(f"Error in final steps: {e}")
-        socketio.emit('function_response', {'result': f"Error in final steps: {e}"})
+        error_message = f"Error in final steps: {e}"
+        print(error_message)
+        socketio.emit('function_response', {'result': error_message})
     return
 
 def device_extend_bed():
