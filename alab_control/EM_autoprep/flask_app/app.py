@@ -134,8 +134,14 @@ def c3dp_test_connectivity(complete_test=False):
 
 def ping(ping_ip):
     try:
+        # Different parameters for Windows vs Unix-based systems
+        if os.name == 'nt':  # Windows
+            command = ["ping", "-n", "2", ping_ip]
+        else:  # Mac/Linux
+            command = ["ping", "-c", "2", ping_ip]
+        
         # Run the ping command
-        result = subprocess.run(["ping", "-c", "2", ping_ip], capture_output=True, text=True)
+        result = subprocess.run(command, capture_output=True, text=True)
         
         # Check the result
         if result.returncode == 0:
@@ -206,11 +212,14 @@ def device_step_zero():
     control_panel_standby()  # This will only run if no exceptions occurred
     return True  # Return True to indicate success
 
-def device_step_final():
-    r = SamplePrepEnder3(c3dp_com_port)
-    r.moveto(*r.intermediate_pos["ZHOME"])
-    r.gohome()
-    control_panel_shutdown()
+def device_step_final(r):
+    try:
+        r.moveto(*r.intermediate_pos["ZHOME"])
+        r.gohome()
+        control_panel_shutdown()
+    except Exception as e:
+        print(f"Error in final steps: {e}")
+        socketio.emit('function_response', {'result': f"Error in final steps: {e}"})
     return
 
 def device_extend_bed():
@@ -230,6 +239,10 @@ def device_extend_bed():
 def sem_process_action(voltage, c_height, distance, etime, origin, destination):
 
     # TODO: The code should test each received variable. e.g., if distance is not beyond safety, if origin and destination exists, etc.
+
+    # Format voltage and time to 5 characters with leading zeros
+    voltage = f"{int(voltage):05d}"
+    etime = f"{int(etime):05d}"
 
     success, connectivity_result = c3dp_test_connectivity(complete_test=False)
     if not success:
@@ -328,7 +341,7 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
         r.speed = SPEED_NORMAL
         r.moveto(*r.intermediate_pos["ZHOME"])
 
-    device_step_final()
+    device_step_final(r)
 
     return
 
