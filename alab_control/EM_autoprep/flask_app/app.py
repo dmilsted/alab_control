@@ -28,7 +28,7 @@ tem_grid_holder_opened = "040"
 tem_grid_holder_closed = "180"
 
 
-# Defined 3D printer constants for safe operation - be careful when changing or the machine might break
+# Define 3D printer constants for safe operation - be careful when changing or the machine might break
 MEASURED_BASE_HEIGHT = 71 #71 is the measured value that David measured
 MAX_EXPOSURE_DISTANCE = 25.0
 SPEED_VLOW = 0.005
@@ -36,6 +36,13 @@ SPEED_LOW = 0.02
 SPEED_NORMAL = 0.05 #0.5
 PAUSE = 2
 PAUSE_VAC = 11
+
+# Define variables for physical control of the 3D printer
+global_robot = None
+connection_failures = 0
+FAILURE_THRESHOLD = 2
+POWER_CYCLE_WAIT = 15  # seconds
+STANDBY_WAIT = 9  # seconds
 
 # CSV files management variables
 CWD = os.getcwd()
@@ -123,11 +130,134 @@ def button_action(button_id):
     print(f"Button action called for {button_id}")
     return f"Button action performed for {button_id}"
 
+def test_robot_connection():
+    global global_robot, connection_failures
+    
+    if global_robot is None:
+        return False
+        
+    try:
+        global_robot.gohome()
+        connection_failures = 0  # Reset counter on successful connection
+        return True
+    except Exception as e:
+        print(f"Robot connection test failed: {e}")
+        connection_failures += 1
+        return False
+
+def reset_robot_connection():
+    global global_robot, connection_failures
+    
+    try:
+        # Clean up existing connection
+        if global_robot is not None:
+            try:
+                global_robot.disconnect()
+            except:
+                pass
+            global_robot = None
+            
+        # Physical reset sequence
+        print("Initiating robot reset sequence...")
+        socketio.emit('function_response', {'result': "Initiating robot reset sequence..."})
+        
+        control_panel_shutdown()
+        print("Waiting for power cycle...")
+        socketio.emit('function_response', {'result': "Waiting for power cycle..."})
+        time.sleep(POWER_CYCLE_WAIT)
+        
+        control_panel_standby()
+        print("Waiting for standby...")
+        socketio.emit('function_response', {'result': "Waiting for standby..."})
+        time.sleep(STANDBY_WAIT)
+        
+        # Try to establish new connection using existing test function
+        success, result = c3dp_test_connectivity(complete_test=True)
+        if success:
+            connection_failures = 0
+            print("Robot reset successful")
+            socketio.emit('function_response', {'result': "Robot reset successful"})
+            return True
+                
+        print("Robot reset failed")
+        socketio.emit('function_response', {'result': result})  # Use the detailed result from test
+        return False
+        
+    except Exception as e:
+        print(f"Error during robot reset: {e}")
+        socketio.emit('function_response', {'result': f"Error during robot reset: {e}"})
+        return False
+    
+def handle_robot_operation(operation_func, *args, **kwargs):
+    global global_robot, connection_failures
+    
+    # Initialize robot if needed
+    if global_robot is None:
+        success, connectivity_result = c3dp_test_connectivity(complete_test=False)
+        if success:
+            global_robot = SamplePrepEnder3(c3dp_com_port)
+        else:
+            print(connectivity_result)
+            socketio.emit('function_response', {'result': connectivity_result})
+            return False
+    
+    # Test connection
+    try:
+        global_robot.gohome()
+        connection_failures = 0  # Reset counter on successful connection
+    except Exception as e:
+        connection_failures += 1
+        if connection_failures >= FAILURE_THRESHOLD:
+            print(f"Connection failed {connection_failures} times. Attempting reset...")
+            socketio.emit('function_response', 
+                {'result': f"Connection failed {connection_failures} times. Attempting reset..."})
+            if not reset_robot_connection():
+                return False
+        else:
+            print(f"Connection failed {connection_failures} times")
+            socketio.emit('function_response', 
+                {'result': f"Connection failed {connection_failures} times"})
+            return False
+    
+    # Execute the requested operation
+    try:
+        return operation_func(global_robot, *args, **kwargs)
+    except Exception as e:
+        print(f"Operation failed: {e}")
+        socketio.emit('function_response', {'result': f"Operation failed: {e}"})
+        return False
+
 def c3dp_test_connectivity(complete_test=False):
     try:
+        # Only try to create a new connection if we don't have a working one
+        global global_robot
+        if global_robot is not None:
+            try:
+                global_robot.gohome()  # Test existing connection
+                result = "3D Printer connection already established and working well."
+                return True, result
+            except:
+                # If existing connection fails, clean it up
+                try:
+                    global_robot.disconnect()
+                except:
+                    pass
+                global_robot = None
+
+        # Try to establish new connection
         r = SamplePrepEnder3(c3dp_com_port)
-        result = "3D Printer connection established and working well."
-        return True, result
+        try:
+            r.gohome()  # Test if connection is actually working
+            global_robot = r  # Save working connection
+            result = "3D Printer connection established and working well."
+            return True, result
+        except:
+            try:
+                r.disconnect()
+            except:
+                pass
+            raise Exception("Connected but failed to home")
+
     except Exception as var_error:
         if complete_test:
             result = f"An error occurred: {var_error}. \n\nThese are the available connections:\n"
@@ -232,179 +362,135 @@ def device_step_final(r):
         socketio.emit('function_response', {'result': error_message})
     return
 
-def device_extend_bed(existing_robot=None):
-    print("3DP bed extension requested.")
-    socketio.emit('function_response', {'result': "3DP bed extension requested."})
-    
-    r = None
-    cleanup_needed = False  # Flag to track if we need to cleanup
-
-    try:
-        # If no robot instance was provided, create one
-        if existing_robot is None:
-            success, connectivity_result = c3dp_test_connectivity(complete_test=False)
-            if not success:
-                print(connectivity_result)
-                socketio.emit('function_response', {'result': connectivity_result})
-                return False
-            r = SamplePrepEnder3(c3dp_com_port)
-            cleanup_needed = True  # We created a new instance, so we'll need to clean it up
-            need_zero = True
-        else:
-            r = existing_robot
-            need_zero = False
-
-        if need_zero:
-            if not device_step_zero():
+def device_extend_bed():
+    def _extend_operation(robot):
+        print("3DP bed extension requested.")
+        socketio.emit('function_response', {'result': "3DP bed extension requested."})
+        
+        try:
+            if device_step_zero():
+                robot.speed = SPEED_NORMAL
+                robot.moveto(*robot.intermediate_pos["BED_EXTENDED"])
+                print("3DP bed extended")
+                socketio.emit('function_response', {'result': "3DP bed extended."})
+                return True
+            else:
+                print("3DP bed couldn't be extended - zero step failed")
+                socketio.emit('function_response', {'result': "3DP bed couldn't be extended - zero step failed"})
                 return False
                 
-        r.speed = SPEED_NORMAL
-        r.moveto(*r.intermediate_pos["BED_EXTENDED"])
-        print("3DP bed extended")
-        socketio.emit('function_response', {'result': "3DP bed extended."})
-        return True
-
-    except Exception as e:
-        error_message = f"3DP bed couldn't be extended: {e}"
-        print(error_message)
-        socketio.emit('function_response', {'result': error_message})
-        return False
-
-    finally:
-        # Only disconnect if we created a new instance
-        if cleanup_needed and r is not None:
-            try:
-                r.disconnect()
-            except Exception as e:
-                print(f"Error disconnecting: {e}")
+        except Exception as e:
+            error_message = f"3DP bed couldn't be extended: {e}"
+            print(error_message)
+            socketio.emit('function_response', {'result': error_message})
+            return False
+            
+    return handle_robot_operation(_extend_operation)
 
 def sem_process_action(voltage, c_height, distance, etime, origin, destination):
-
-    # TODO: The code should test each received variable. e.g., if distance is not beyond safety, if origin and destination exists, etc.
-
-    r = None
-    try:
-        # Format voltage and time to 5 characters with leading zeros
-        voltage = f"{int(voltage):05d}"
-        etime = f"{int(etime):05d}"
-
-        # First test connectivity
-        success, connectivity_result = c3dp_test_connectivity(complete_test=False)
-        if not success:
-            print(connectivity_result)
-            socketio.emit('function_response', {'result': connectivity_result})
-            return False
-
-        # Create robot instance
-        r = SamplePrepEnder3(c3dp_com_port)
-
-        print(f"SEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}")
-        socketio.emit('function_response', {'result': f"SEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}"})
-
+    def _sem_operation(robot, voltage, c_height, distance, etime, origin, destination):
         try:
-            r.gohome()
-            control_panel_standby()
-        except Exception as var_error:
-            print(f"An error occurred: {var_error}")
-            socketio.emit('function_response', {'result': f"An error occurred: {var_error}"})
-            return False
-        r.speed = SPEED_NORMAL
-        r.moveto(*r.intermediate_pos["ZHOME"])
-        print(f"Collecting stub from {origin}")
-        socketio.emit('function_response', {'result': f"Collecting stub from {origin}."})
+            # Format voltage and time to 5 characters with leading zeros
+            voltage = f"{int(voltage):05d}"
+            etime = f"{int(etime):05d}"
 
-        stub_pick_trials = 0
-        stub_picked = False
-        control_panel_vacuum("SEM",True)
-        while True:
-            if stub_pick_trials > 2:
-                print("Stub not picked 3 times in a row. Aborted.")
-                socketio.emit('function_response', {'result': "Stub not picked 3 times in a row. Aborted."})
-                control_panel_vacuum("SEM",False)
-                break
-            else:
-                print("Trying to pick the stub...")
-                socketio.emit('function_response', {'result': "Trying to pick the stub..."})
+            print(f"SEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}")
+            socketio.emit('function_response', {'result': f"SEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}"})
 
-            r.moveto(*r.clean_stub_pos[origin])
-            # Descending needle
-            r.moveto(*r.clean_stub_pos["STRAY_Z1"])
-            r.speed = SPEED_LOW
-            
-            # Descending needle, slower speed
-            r.moveto(*r.clean_stub_pos["STRAY_Z2"])
-            r.speed = SPEED_VLOW
-            
-            # Trying to collect stub delicately
-            r.moveto(*r.clean_stub_pos["STRAY_Z3"])
-            r.moveto(*r.clean_stub_pos["STRAY_Z2"])
-            r.speed = SPEED_NORMAL
-            r.moveto(*r.intermediate_pos["ZHOME"])
-            print("Checking if stub was picked...")
-            socketio.emit('function_response', {'result': "Checking if stub was picked..."})
-            r.moveto(*r.equipment_pos["LASERSEM"])
-            r.moveto(*r.equipment_pos["LASERSEM_Z1"])
-
-            if control_panel_laser_status() == "LASER1":
-            #if True: #for debugging, delete!
-                print("Stub was picked!")
-                socketio.emit('function_response', {'result': "Stub was picked!"})
-                stub_picked = True
-                r.moveto(*r.intermediate_pos["ZHOME"])
-                break
-            else:
-                print("Stub was not detected. Trying again...")
-                socketio.emit('function_response', {'result': ".Stub was not detected. Trying again..."})
-                r.moveto(*r.intermediate_pos["ZHOME"])
-                stub_pick_trials = stub_pick_trials+1
-
-        if stub_picked:
-            r.moveto(*r.intermediate_pos["ZHOME"])
-            r.moveto(*r.intermediate_pos["CHARGER"])
-            r.moveto(z=MEASURED_BASE_HEIGHT - int(c_height))
-
-            #TODO: check if the exposition heights make sense. It seems it is reversed (going up when it should go down, and vice -versa)
-            socketio.emit('function_response', {'result': f"Setting at: {MEASURED_BASE_HEIGHT - int(c_height)} mm."})
-            r.moveto(z=MEASURED_BASE_HEIGHT -  int(c_height) + int(distance))
-            socketio.emit('function_response', {'result': f"Exposing at: {MEASURED_BASE_HEIGHT - int(c_height) + int(distance)} mm."})
-            print(f"Stub will be exposed to {voltage} kV for {etime} ms.")
-            socketio.emit('function_response', {'result': f"Stub will be exposed to {voltage} kV for {etime} ms."})
-            control_panel_hvps_setting(voltage,etime)
-            time.sleep(int(etime)/1000+2)
-            r.moveto(*r.intermediate_pos["ZHOME"])
-            
-            print(f"Delivering stub to {origin}.")
-            socketio.emit('function_response', {'result': f"Delivering stub to {origin}."})
-            r.moveto(*r.clean_stub_pos[origin])
-            r.moveto(*r.clean_stub_pos["STRAY_Z1"])
-            r.speed = SPEED_LOW
-            r.moveto(*r.clean_stub_pos["STRAY_Z2"])
-            r.speed = SPEED_VLOW
-            r.moveto(*r.clean_stub_pos["STRAY_Z3"])
-            control_panel_vacuum("SEM",False)
-            time.sleep(PAUSE_VAC)
-            r.moveto(*r.clean_stub_pos["STRAY_Z2"])
-            r.speed = SPEED_NORMAL
-            r.moveto(*r.intermediate_pos["ZHOME"])
-
-        device_step_final(r)
-    
-    except Exception as e:
-        print(f"Error in process: {e}")
-        socketio.emit('function_response', {'result': f"Error in process: {e}"})
-        return False
-        
-    finally:
-        # Clean up the robot instance if it exists
-        if r is not None:
             try:
-                r.disconnect()  # You'll need to implement this method in your SamplePrepEnder3 class
-            except Exception as e:
-                print(f"Error disconnecting: {e}")
+                robot.gohome()
+                control_panel_standby()
+            except Exception as var_error:
+                print(f"An error occurred: {var_error}")
+                socketio.emit('function_response', {'result': f"An error occurred: {var_error}"})
+                return False
 
-    return True
+            robot.speed = SPEED_NORMAL
+            robot.moveto(*robot.intermediate_pos["ZHOME"])
+            print(f"Collecting stub from {origin}")
+            socketio.emit('function_response', {'result': f"Collecting stub from {origin}."})
 
-    return
+            stub_pick_trials = 0
+            stub_picked = False
+            control_panel_vacuum("SEM",True)
+            while True:
+                if stub_pick_trials > 2:
+                    print("Stub not picked 3 times in a row. Aborted.")
+                    socketio.emit('function_response', {'result': "Stub not picked 3 times in a row. Aborted."})
+                    control_panel_vacuum("SEM",False)
+                    break
+                else:
+                    print("Trying to pick the stub...")
+                    socketio.emit('function_response', {'result': "Trying to pick the stub..."})
+
+                robot.moveto(*robot.clean_stub_pos[origin])
+                # Descending needle
+                robot.moveto(*robot.clean_stub_pos["STRAY_Z1"])
+                robot.speed = SPEED_LOW
+                
+                # Descending needle, slower speed
+                robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+                robot.speed = SPEED_VLOW
+                
+                # Trying to collect stub delicately
+                robot.moveto(*robot.clean_stub_pos["STRAY_Z3"])
+                robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+                robot.speed = SPEED_NORMAL
+                robot.moveto(*robot.intermediate_pos["ZHOME"])
+                print("Checking if stub was picked...")
+                socketio.emit('function_response', {'result': "Checking if stub was picked..."})
+                robot.moveto(*robot.equipment_pos["LASERSEM"])
+                robot.moveto(*robot.equipment_pos["LASERSEM_Z1"])
+
+                if control_panel_laser_status() == "LASER1":
+                    print("Stub was picked!")
+                    socketio.emit('function_response', {'result': "Stub was picked!"})
+                    stub_picked = True
+                    robot.moveto(*robot.intermediate_pos["ZHOME"])
+                    break
+                else:
+                    print("Stub was not detected. Trying again...")
+                    socketio.emit('function_response', {'result': "Stub was not detected. Trying again..."})
+                    robot.moveto(*robot.intermediate_pos["ZHOME"])
+                    stub_pick_trials = stub_pick_trials+1
+
+            if stub_picked:
+                robot.moveto(*robot.intermediate_pos["ZHOME"])
+                robot.moveto(*robot.intermediate_pos["CHARGER"])
+                robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height))
+
+                socketio.emit('function_response', {'result': f"Setting at: {MEASURED_BASE_HEIGHT - int(c_height)} mm."})
+                robot.moveto(z=MEASURED_BASE_HEIGHT -  int(c_height) + int(distance))
+                socketio.emit('function_response', {'result': f"Exposing at: {MEASURED_BASE_HEIGHT - int(c_height) + int(distance)} mm."})
+                print(f"Stub will be exposed to {voltage} kV for {etime} ms.")
+                socketio.emit('function_response', {'result': f"Stub will be exposed to {voltage} kV for {etime} ms."})
+                control_panel_hvps_setting(voltage,etime)
+                time.sleep(int(etime)/1000+2)
+                robot.moveto(*robot.intermediate_pos["ZHOME"])
+                
+                print(f"Delivering stub to {origin}.")
+                socketio.emit('function_response', {'result': f"Delivering stub to {origin}."})
+                robot.moveto(*robot.clean_stub_pos[origin])
+                robot.moveto(*robot.clean_stub_pos["STRAY_Z1"])
+                robot.speed = SPEED_LOW
+                robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+                robot.speed = SPEED_VLOW
+                robot.moveto(*robot.clean_stub_pos["STRAY_Z3"])
+                control_panel_vacuum("SEM",False)
+                time.sleep(PAUSE_VAC)
+                robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+                robot.speed = SPEED_NORMAL
+                robot.moveto(*robot.intermediate_pos["ZHOME"])
+
+            device_step_final(robot)
+            return True
+
+        except Exception as e:
+            print(f"Error in process: {e}")
+            socketio.emit('function_response', {'result': f"Error in process: {e}"})
+            return False
+
+    return handle_robot_operation(_sem_operation, voltage, c_height, distance, etime, origin, destination)
 
 def tem_process_action(voltage, c_height, distance, etime, origin, destination):
     print(f"TEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}")
@@ -412,7 +498,7 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination):
     r = SamplePrepEnder3(c3dp_com_port)
 
     # TODO: The code should test each received variable. e.g., if distance is not beyond safety, if origin and destination exists, etc.
-
+    ''' THIS FUNCTION IS TOO OUTDATED AND NEEDS TO BE FIXED USING THE SAME ALGORITHM AND STYLE OF THE SEM VERSION BEFORE RUNNING
     if device_step_zero():
         r.speed = SPEED_NORMAL
         r.moveto(*r.intermediate_pos["ZHOME"])
@@ -493,7 +579,7 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination):
             r.speed = SPEED_NORMAL
             r.moveto(*r.intermediate_pos["ZHOME"])
 
-        device_step_final()
+        device_step_final() '''
 
     return
 
