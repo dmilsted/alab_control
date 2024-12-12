@@ -33,14 +33,14 @@ MEASURED_BASE_HEIGHT = 71 #71 is the measured value that David measured
 MAX_EXPOSURE_DISTANCE = 25.0
 SPEED_VLOW = 0.005
 SPEED_LOW = 0.02
-SPEED_NORMAL = 0.5
+SPEED_NORMAL = 0.05 #0.5
 PAUSE = 2
 PAUSE_VAC = 11
 
 # CSV files management variables
 CWD = os.getcwd()
 positions = {}
-path = CWD + '/EM_autoprep/Positions/'
+rootpath = os.path.join(CWD, "alab_control","EM_autoprep","Positions") #'\EM_autoprep\Positions\'
 clean_disks_filename = 'disks_tray_clean.csv'
 used_disks_filename = 'disks_tray_used.csv'
 equipment_filename = 'equipment.csv'
@@ -65,25 +65,25 @@ def read_CSV_into_positions(path):
 class SamplePrepEnder3(Ender3):
     # positions
     clean_disk_pos = read_CSV_into_positions(
-        path=path + clean_disks_filename
+        filepath=os.path.join(rootpath, clean_disks_filename)
     )
     used_disk_pos = read_CSV_into_positions(
-        path=path + used_disks_filename
+        filepath=os.path.join(rootpath, used_disks_filename)
     )
     equipment_pos = read_CSV_into_positions(
-        path=path + equipment_filename
+        filepath=os.path.join(rootpath, equipment_filename)
     )
     intermediate_pos = read_CSV_into_positions(
-        path=path + intermediate_positions_filename
+        filepath=os.path.join(rootpath, intermediate_positions_filename)
     )
     used_stub_pos = read_CSV_into_positions(
-        path=path + phenom_holder_positions_filename
+        filepath=os.path.join(rootpath, phenom_holder_positions_filename)
     )
     phenom_handler_pos = read_CSV_into_positions(
-        path=path + phenom_handler_filename
+        filepath=os.path.join(rootpath, phenom_handler_filename)
     )
     clean_stub_pos = read_CSV_into_positions(
-        path=path + stubs_tray_filename
+        filepath=os.path.join(rootpath, stubs_tray_filename)
     )
 
 # Define action functions
@@ -232,7 +232,7 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
     socketio.emit('function_response', {'result': f"SEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}"})
     r = SamplePrepEnder3(c3dp_com_port)
 
-    # TODO: The code should test each received variable. e.g., if distance is not beiond safety, if origin and destination exists, etc.
+    # TODO: The code should test each received variable. e.g., if distance is not beyond safety, if origin and destination exists, etc.
 
     if device_step_zero():
         r.speed = SPEED_NORMAL
@@ -247,6 +247,7 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
             if stub_pick_trials > 2:
                 print("Stub not picked 3 times in a row. Aborted.")
                 socketio.emit('function_response', {'result': "Stub not picked 3 times in a row. Aborted."})
+                control_panel_vacuum("SEM",False)
                 break
             else:
                 print("Trying to pick the stub...")
@@ -268,8 +269,8 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
             r.moveto(*r.intermediate_pos["ZHOME"])
             print("Checking if stub was picked...")
             socketio.emit('function_response', {'result': "Checking if stub was picked..."})
-            r.moveto(*r.equipment_pos["LASER"])
-            r.moveto(*r.equipment_pos["LASER_Z1"])
+            r.moveto(*r.equipment_pos["LASERSEM"])
+            r.moveto(*r.equipment_pos["LASERSEM_Z1"])
 
             if control_panel_laser_status() == "LASER1":
             #if True: #for debugging, delete!
@@ -282,7 +283,6 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
                 print("Stub was not detected. Trying again...")
                 socketio.emit('function_response', {'result': ".Stub was not detected. Trying again..."})
                 r.moveto(*r.intermediate_pos["ZHOME"])
-                control_panel_vacuum("SEM",False)
                 stub_pick_trials = stub_pick_trials+1
 
         if stub_picked:
@@ -309,6 +309,97 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
             r.speed = SPEED_VLOW
             r.moveto(*r.clean_stub_pos["STRAY_Z3"])
             control_panel_vacuum("SEM",False)
+            time.sleep(PAUSE_VAC)
+            r.moveto(*r.clean_stub_pos["STRAY_Z2"])
+            r.speed = SPEED_NORMAL
+            r.moveto(*r.intermediate_pos["ZHOME"])
+
+        device_step_final()
+
+    return
+
+def tem_process_action(voltage, c_height, distance, etime, origin, destination):
+    print(f"TEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}")
+    socketio.emit('function_response', {'result': f"TEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}"})
+    r = SamplePrepEnder3(c3dp_com_port)
+
+    # TODO: The code should test each received variable. e.g., if distance is not beyond safety, if origin and destination exists, etc.
+
+    if device_step_zero():
+        r.speed = SPEED_NORMAL
+        r.moveto(*r.intermediate_pos["ZHOME"])
+        print(f"Collecting grid from {origin}")
+        socketio.emit('function_response', {'result': f"Collecting grid from {origin}."})
+
+        grid_pick_trials = 0
+        grid_picked = False
+        control_panel_vacuum("TEM",True)
+        while True:
+            if grid_pick_trials > 2:
+                print("Grid not picked 3 times in a row. Aborted.")
+                socketio.emit('function_response', {'result': "Grid not picked 3 times in a row. Aborted."})
+                control_panel_vacuum("TEM",False)
+                break
+            else:
+                print("Trying to pick the grid...")
+                socketio.emit('function_response', {'result': "Trying to pick the grid..."})
+
+            r.moveto(*r.clean_stub_pos[origin])
+            # Descending needle
+            r.moveto(*r.clean_stub_pos["STRAY_Z1"])
+            r.speed = SPEED_LOW
+            
+            # Descending needle, slower speed
+            r.moveto(*r.clean_stub_pos["STRAY_Z2"])
+            r.speed = SPEED_VLOW
+            
+            # Trying to collect stub delicately
+            r.moveto(*r.clean_stub_pos["STRAY_Z3"])
+            r.moveto(*r.clean_stub_pos["STRAY_Z2"])
+            r.speed = SPEED_NORMAL
+            r.moveto(*r.intermediate_pos["ZHOME"])
+            print("Checking if grid was picked...")
+            socketio.emit('function_response', {'result': "Checking if grid was picked..."})
+            r.moveto(*r.equipment_pos["LASERTEM"])
+            r.moveto(*r.equipment_pos["LASERTEM_Z1"])
+
+            if control_panel_laser_status() == "LASER1":
+            #if True: #for debugging, delete!
+                print("Grid was picked!")
+                socketio.emit('function_response', {'result': "Grid was picked!"})
+                stub_picked = True
+                r.moveto(*r.intermediate_pos["ZHOME"])
+                break
+            else:
+                print("Grid was not detected. Trying again...")
+                socketio.emit('function_response', {'result': ".Grid was not detected. Trying again..."})
+                r.moveto(*r.intermediate_pos["ZHOME"])
+                grid_pick_trials = grid_pick_trials+1
+
+        if stub_picked:
+            r.moveto(*r.intermediate_pos["ZHOME"])
+            r.moveto(*r.intermediate_pos["CHARGER"])
+            r.moveto(z=MEASURED_BASE_HEIGHT - int(c_height))
+
+            #TODO: check if the exposition heights make sense. It seems it is reversed (going up when it should go down, and vice -versa)
+            socketio.emit('function_response', {'result': f"Setting at: {MEASURED_BASE_HEIGHT - int(c_height)} mm."})
+            r.moveto(z=MEASURED_BASE_HEIGHT -  int(c_height) + int(distance))
+            socketio.emit('function_response', {'result': f"Exposing at: {MEASURED_BASE_HEIGHT - int(c_height) + int(distance)} mm."})
+            print(f"Grid will be exposed to {voltage} kV for {etime} ms.")
+            socketio.emit('function_response', {'result': f"Grid will be exposed to {voltage} kV for {etime} ms."})
+            control_panel_hvps_setting(voltage,etime)
+            time.sleep(int(etime)/1000+2)
+            r.moveto(*r.intermediate_pos["ZHOME"])
+            
+            print(f"Delivering grid to {origin}.")
+            socketio.emit('function_response', {'result': f"Delivering grid to {origin}."})
+            r.moveto(*r.clean_stub_pos[origin])
+            r.moveto(*r.clean_stub_pos["STRAY_Z1"])
+            r.speed = SPEED_LOW
+            r.moveto(*r.clean_stub_pos["STRAY_Z2"])
+            r.speed = SPEED_VLOW
+            r.moveto(*r.clean_stub_pos["STRAY_Z3"])
+            control_panel_vacuum("TEM",False)
             time.sleep(PAUSE_VAC)
             r.moveto(*r.clean_stub_pos["STRAY_Z2"])
             r.speed = SPEED_NORMAL
