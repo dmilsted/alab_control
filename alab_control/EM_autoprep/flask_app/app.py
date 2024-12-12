@@ -332,35 +332,47 @@ def control_panel_vacuum(destination,status=False):
             send_plc_command("STANDBY")
 
 def device_step_zero():
-    success, connectivity_result = c3dp_test_connectivity(complete_test=False)
-    if success:
-        r = SamplePrepEnder3(c3dp_com_port)
+    def _zero_operation(robot):
         try:
-            r.gohome()
+            robot.gohome()
+            control_panel_standby()
+            print("Device zeroed successfully")
+            socketio.emit('function_response', {'result': "Device zeroed successfully"})
+            return True
         except Exception as var_error:
-            print(f"An error occurred: {var_error}")
-            socketio.emit("An error occurred: {var_error}")  # Assuming this emits the error message to the client
-            return False  # Return False to indicate failure
+            print(f"An error occurred during zeroing: {var_error}")
+            socketio.emit('function_response', {'result': f"An error occurred during zeroing: {var_error}"})
+            return False
+
+    return handle_robot_operation(_zero_operation)
+
+def device_step_final(robot=None):
+    def _final_operation(robot):
+        try:
+            robot.moveto(*robot.intermediate_pos["ZHOME"])
+            robot.gohome()
+            control_panel_standby()
+            
+            # Call device_extend_bed through the new system
+            if not device_extend_bed():
+                raise Exception("Failed to extend bed")
+                
+            print("Sample preparation completed successfully.")
+            socketio.emit('function_response', {'result': "Sample preparation completed successfully."})
+            return True
+            
+        except Exception as e:
+            error_message = f"Error in final steps: {e}"
+            print(error_message)
+            socketio.emit('function_response', {'result': error_message})
+            return False
+
+    # If a robot instance was passed, use it directly
+    if robot is not None:
+        return _final_operation(robot)
     else:
-        # Connectivity test failed, return the error message
-        socketio.emit(connectivity_result)
-        return connectivity_result
-
-    control_panel_standby()  # This will only run if no exceptions occurred
-    return True  # Return True to indicate success
-
-def device_step_final(r):
-    try:
-        r.moveto(*r.intermediate_pos["ZHOME"])
-        r.gohome()
-        control_panel_standby()
-        device_extend_bed(r)
-        socketio.emit('function_response', {'result': "Sample preparation completed successfully."})
-    except Exception as e:
-        error_message = f"Error in final steps: {e}"
-        print(error_message)
-        socketio.emit('function_response', {'result': error_message})
-    return
+        # Otherwise use the global robot management system
+        return handle_robot_operation(_final_operation)
 
 def device_extend_bed():
     def _extend_operation(robot):
