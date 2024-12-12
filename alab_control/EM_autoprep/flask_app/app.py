@@ -237,18 +237,14 @@ def handle_robot_operation(operation_func, *args, **kwargs):
 
 def c3dp_test_connectivity(complete_test=False):
     try:
-        # Only try to create a new connection if we don't have a working one
         global global_robot
+        
+        # If we already have a connection, test it
         if global_robot is not None:
-            try:
-                # Test existing connection with M115 command
-                global_robot.printer.write("M115\n".encode())
-                response = global_robot.printer.readline().decode()
-                if "ok" in response.lower() or "FIRMWARE_NAME" in response:
-                    result = "3D Printer connection already established and working well."
-                    return True, result
-            except:
-                # If existing connection fails, clean it up
+            if global_robot.test_connection():
+                return True, "3D Printer connection already established and working."
+            else:
+                # Clean up failed connection
                 try:
                     global_robot.disconnect()
                 except:
@@ -256,33 +252,26 @@ def c3dp_test_connectivity(complete_test=False):
                 global_robot = None
 
         # Try to establish new connection
-        r = SamplePrepEnder3(c3dp_com_port)
         try:
-            # Test new connection with M115 command
-            r.printer.write("M115\n".encode())
-            response = r.printer.readline().decode()
-            if "ok" in response.lower() or "FIRMWARE_NAME" in response:
-                global_robot = r  # Save working connection
-                result = "3D Printer connection established and working well."
-                return True, result
+            robot = Ender3(c3dp_com_port)
+            if robot.test_connection():
+                global_robot = robot
+                return True, "3D Printer connection established successfully."
             else:
-                raise Exception("Invalid response from printer")
-        except:
-            try:
-                r.disconnect()
-            except:
-                pass
-            raise Exception("Connected but failed to communicate")
+                robot.disconnect()
+                raise Exception("Connected but failed communication test")
+                
+        except Exception as e:
+            raise Exception(f"Failed to establish connection: {e}")
 
     except Exception as var_error:
         if complete_test:
-            result = f"An error occurred: {var_error}. \n\nThese are the available connections:\n"
+            result = f"An error occurred: {var_error}. \n\nAvailable ports:\n"
             ports = list(serial.tools.list_ports.comports())
             for p in ports:
-                result += f"{p}\n\n"
+                result += f"{p}\n"
         else:
-            result = "It was not possible to connect to the printer. Test the connectivity on the machine test page."
-        print(result)
+            result = f"Could not connect to printer: {var_error}"
         return False, result
     
 def handle_control_panel_operation(operation_func, *args, **kwargs):

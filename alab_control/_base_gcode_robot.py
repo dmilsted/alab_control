@@ -104,6 +104,45 @@ class BaseGcodeRobot(ABC):
         self._handle.close()
         del self._handle
         print("Disconnected from robot!")
+    
+    def test_connection(self) -> bool:
+        """Tests if the connection to the printer is working.
+        
+        Returns:
+            bool: True if connection is working, False otherwise
+        """
+        try:
+            # Try to get a response using M114 (get position)
+            output = self.write("M114")
+            for line in output:
+                if line.startswith("X:"):
+                    return True
+            return False
+        except Exception as e:
+            print(f"Connection test failed: {e}")
+            return False
+
+    def reset_connection(self) -> bool:
+        """Attempts to reset the connection to the printer.
+        
+        Returns:
+            bool: True if reset successful, False otherwise
+        """
+        try:
+            self.disconnect()
+            time.sleep(2)
+            self.connect()
+            return self.test_connection()
+        except:
+            return False
+
+    def is_connected(self) -> bool:
+        """Checks if serial connection is open
+        
+        Returns:
+            bool: True if connected, False otherwise
+        """
+        return hasattr(self, '_handle') and self._handle.is_open
 
     def moveto(
         self,
