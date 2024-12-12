@@ -228,93 +228,107 @@ def device_extend_bed():
     return
 
 def sem_process_action(voltage, c_height, distance, etime, origin, destination):
-    print(f"SEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}")
-    socketio.emit('function_response', {'result': f"SEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}"})
-    r = SamplePrepEnder3(c3dp_com_port)
 
     # TODO: The code should test each received variable. e.g., if distance is not beyond safety, if origin and destination exists, etc.
 
-    if device_step_zero():
+    success, connectivity_result = c3dp_test_connectivity(complete_test=False)
+    if not success:
+        print(connectivity_result)
+        socketio.emit('function_response', {'result': connectivity_result})
+        return False
+
+    r = SamplePrepEnder3(c3dp_com_port)
+
+    print(f"SEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}")
+    socketio.emit('function_response', {'result': f"SEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}"})
+
+    try:
+        r.gohome()
+        control_panel_standby()
+    except Exception as var_error:
+        print(f"An error occurred: {var_error}")
+        socketio.emit('function_response', {'result': f"An error occurred: {var_error}"})
+        return False
+    r.speed = SPEED_NORMAL
+    r.moveto(*r.intermediate_pos["ZHOME"])
+    print(f"Collecting stub from {origin}")
+    socketio.emit('function_response', {'result': f"Collecting stub from {origin}."})
+
+    stub_pick_trials = 0
+    stub_picked = False
+    control_panel_vacuum("SEM",True)
+    while True:
+        if stub_pick_trials > 2:
+            print("Stub not picked 3 times in a row. Aborted.")
+            socketio.emit('function_response', {'result': "Stub not picked 3 times in a row. Aborted."})
+            control_panel_vacuum("SEM",False)
+            break
+        else:
+            print("Trying to pick the stub...")
+            socketio.emit('function_response', {'result': "Trying to pick the stub..."})
+
+        r.moveto(*r.clean_stub_pos[origin])
+        # Descending needle
+        r.moveto(*r.clean_stub_pos["STRAY_Z1"])
+        r.speed = SPEED_LOW
+        
+        # Descending needle, slower speed
+        r.moveto(*r.clean_stub_pos["STRAY_Z2"])
+        r.speed = SPEED_VLOW
+        
+        # Trying to collect stub delicately
+        r.moveto(*r.clean_stub_pos["STRAY_Z3"])
+        r.moveto(*r.clean_stub_pos["STRAY_Z2"])
         r.speed = SPEED_NORMAL
         r.moveto(*r.intermediate_pos["ZHOME"])
-        print(f"Collecting stub from {origin}")
-        socketio.emit('function_response', {'result': f"Collecting stub from {origin}."})
+        print("Checking if stub was picked...")
+        socketio.emit('function_response', {'result': "Checking if stub was picked..."})
+        r.moveto(*r.equipment_pos["LASERSEM"])
+        r.moveto(*r.equipment_pos["LASERSEM_Z1"])
 
-        stub_pick_trials = 0
-        stub_picked = False
-        control_panel_vacuum("SEM",True)
-        while True:
-            if stub_pick_trials > 2:
-                print("Stub not picked 3 times in a row. Aborted.")
-                socketio.emit('function_response', {'result': "Stub not picked 3 times in a row. Aborted."})
-                control_panel_vacuum("SEM",False)
-                break
-            else:
-                print("Trying to pick the stub...")
-                socketio.emit('function_response', {'result': "Trying to pick the stub..."})
-
-            r.moveto(*r.clean_stub_pos[origin])
-            # Descending needle
-            r.moveto(*r.clean_stub_pos["STRAY_Z1"])
-            r.speed = SPEED_LOW
-            
-            # Descending needle, slower speed
-            r.moveto(*r.clean_stub_pos["STRAY_Z2"])
-            r.speed = SPEED_VLOW
-            
-            # Trying to collect stub delicately
-            r.moveto(*r.clean_stub_pos["STRAY_Z3"])
-            r.moveto(*r.clean_stub_pos["STRAY_Z2"])
-            r.speed = SPEED_NORMAL
+        if control_panel_laser_status() == "LASER1":
+        #if True: #for debugging, delete!
+            print("Stub was picked!")
+            socketio.emit('function_response', {'result': "Stub was picked!"})
+            stub_picked = True
             r.moveto(*r.intermediate_pos["ZHOME"])
-            print("Checking if stub was picked...")
-            socketio.emit('function_response', {'result': "Checking if stub was picked..."})
-            r.moveto(*r.equipment_pos["LASERSEM"])
-            r.moveto(*r.equipment_pos["LASERSEM_Z1"])
-
-            if control_panel_laser_status() == "LASER1":
-            #if True: #for debugging, delete!
-                print("Stub was picked!")
-                socketio.emit('function_response', {'result': "Stub was picked!"})
-                stub_picked = True
-                r.moveto(*r.intermediate_pos["ZHOME"])
-                break
-            else:
-                print("Stub was not detected. Trying again...")
-                socketio.emit('function_response', {'result': ".Stub was not detected. Trying again..."})
-                r.moveto(*r.intermediate_pos["ZHOME"])
-                stub_pick_trials = stub_pick_trials+1
-
-        if stub_picked:
+            break
+        else:
+            print("Stub was not detected. Trying again...")
+            socketio.emit('function_response', {'result': ".Stub was not detected. Trying again..."})
             r.moveto(*r.intermediate_pos["ZHOME"])
-            r.moveto(*r.intermediate_pos["CHARGER"])
-            r.moveto(z=MEASURED_BASE_HEIGHT - int(c_height))
+            stub_pick_trials = stub_pick_trials+1
 
-            #TODO: check if the exposition heights make sense. It seems it is reversed (going up when it should go down, and vice -versa)
-            socketio.emit('function_response', {'result': f"Setting at: {MEASURED_BASE_HEIGHT - int(c_height)} mm."})
-            r.moveto(z=MEASURED_BASE_HEIGHT -  int(c_height) + int(distance))
-            socketio.emit('function_response', {'result': f"Exposing at: {MEASURED_BASE_HEIGHT - int(c_height) + int(distance)} mm."})
-            print(f"Stub will be exposed to {voltage} kV for {etime} ms.")
-            socketio.emit('function_response', {'result': f"Stub will be exposed to {voltage} kV for {etime} ms."})
-            control_panel_hvps_setting(voltage,etime)
-            time.sleep(int(etime)/1000+2)
-            r.moveto(*r.intermediate_pos["ZHOME"])
-            
-            print(f"Delivering stub to {origin}.")
-            socketio.emit('function_response', {'result': f"Delivering stub to {origin}."})
-            r.moveto(*r.clean_stub_pos[origin])
-            r.moveto(*r.clean_stub_pos["STRAY_Z1"])
-            r.speed = SPEED_LOW
-            r.moveto(*r.clean_stub_pos["STRAY_Z2"])
-            r.speed = SPEED_VLOW
-            r.moveto(*r.clean_stub_pos["STRAY_Z3"])
-            control_panel_vacuum("SEM",False)
-            time.sleep(PAUSE_VAC)
-            r.moveto(*r.clean_stub_pos["STRAY_Z2"])
-            r.speed = SPEED_NORMAL
-            r.moveto(*r.intermediate_pos["ZHOME"])
+    if stub_picked:
+        r.moveto(*r.intermediate_pos["ZHOME"])
+        r.moveto(*r.intermediate_pos["CHARGER"])
+        r.moveto(z=MEASURED_BASE_HEIGHT - int(c_height))
 
-        device_step_final()
+        #TODO: check if the exposition heights make sense. It seems it is reversed (going up when it should go down, and vice -versa)
+        socketio.emit('function_response', {'result': f"Setting at: {MEASURED_BASE_HEIGHT - int(c_height)} mm."})
+        r.moveto(z=MEASURED_BASE_HEIGHT -  int(c_height) + int(distance))
+        socketio.emit('function_response', {'result': f"Exposing at: {MEASURED_BASE_HEIGHT - int(c_height) + int(distance)} mm."})
+        print(f"Stub will be exposed to {voltage} kV for {etime} ms.")
+        socketio.emit('function_response', {'result': f"Stub will be exposed to {voltage} kV for {etime} ms."})
+        control_panel_hvps_setting(voltage,etime)
+        time.sleep(int(etime)/1000+2)
+        r.moveto(*r.intermediate_pos["ZHOME"])
+        
+        print(f"Delivering stub to {origin}.")
+        socketio.emit('function_response', {'result': f"Delivering stub to {origin}."})
+        r.moveto(*r.clean_stub_pos[origin])
+        r.moveto(*r.clean_stub_pos["STRAY_Z1"])
+        r.speed = SPEED_LOW
+        r.moveto(*r.clean_stub_pos["STRAY_Z2"])
+        r.speed = SPEED_VLOW
+        r.moveto(*r.clean_stub_pos["STRAY_Z3"])
+        control_panel_vacuum("SEM",False)
+        time.sleep(PAUSE_VAC)
+        r.moveto(*r.clean_stub_pos["STRAY_Z2"])
+        r.speed = SPEED_NORMAL
+        r.moveto(*r.intermediate_pos["ZHOME"])
+
+    device_step_final()
 
     return
 
