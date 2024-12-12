@@ -19,7 +19,7 @@ udp_port = 8001
 server_ip = "142.251.214.142" #change to server's IP. This is google :)
 plc_ip = '192.168.0.46'
 plc_port = 8888
-c3dp_com_port = "/dev/cu.usbmodem112401"
+c3dp_com_port = "COM7"
 
 # Define numeric values for linear actuators
 sem_stage_opened = "015"
@@ -65,25 +65,25 @@ def read_CSV_into_positions(path):
 class SamplePrepEnder3(Ender3):
     # positions
     clean_disk_pos = read_CSV_into_positions(
-        filepath=os.path.join(rootpath, clean_disks_filename)
+        path=os.path.join(rootpath, clean_disks_filename)
     )
     used_disk_pos = read_CSV_into_positions(
-        filepath=os.path.join(rootpath, used_disks_filename)
+        path=os.path.join(rootpath, used_disks_filename)
     )
     equipment_pos = read_CSV_into_positions(
-        filepath=os.path.join(rootpath, equipment_filename)
+        path=os.path.join(rootpath, equipment_filename)
     )
     intermediate_pos = read_CSV_into_positions(
-        filepath=os.path.join(rootpath, intermediate_positions_filename)
+        path=os.path.join(rootpath, intermediate_positions_filename)
     )
     used_stub_pos = read_CSV_into_positions(
-        filepath=os.path.join(rootpath, phenom_holder_positions_filename)
+        path=os.path.join(rootpath, phenom_holder_positions_filename)
     )
     phenom_handler_pos = read_CSV_into_positions(
-        filepath=os.path.join(rootpath, phenom_handler_filename)
+        path=os.path.join(rootpath, phenom_handler_filename)
     )
     clean_stub_pos = read_CSV_into_positions(
-        filepath=os.path.join(rootpath, stubs_tray_filename)
+        path=os.path.join(rootpath, stubs_tray_filename)
     )
 
 # Define action functions
