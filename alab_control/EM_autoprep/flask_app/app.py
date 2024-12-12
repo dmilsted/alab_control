@@ -33,7 +33,7 @@ MEASURED_BASE_HEIGHT = 71 #71 is the measured value that David measured
 MAX_EXPOSURE_DISTANCE = 25.0
 SPEED_VLOW = 0.005
 SPEED_LOW = 0.02
-SPEED_NORMAL = 0.05 #0.5
+SPEED_NORMAL = 0.5
 PAUSE = 2
 PAUSE_VAC = 11
 
@@ -137,9 +137,14 @@ def test_robot_connection():
         return False
         
     try:
-        global_robot.gohome()
-        connection_failures = 0  # Reset counter on successful connection
-        return True
+        # Try to get printer status or send a simple M115 command
+        global_robot.printer.write("M115\n".encode())  # Get Firmware Info
+        response = global_robot.printer.readline().decode()
+        if "ok" in response.lower() or "FIRMWARE_NAME" in response:
+            connection_failures = 0  # Reset counter on successful connection
+            return True
+        else:
+            raise Exception("Invalid response from printer")
     except Exception as e:
         print(f"Robot connection test failed: {e}")
         connection_failures += 1
@@ -201,9 +206,12 @@ def handle_robot_operation(operation_func, *args, **kwargs):
             socketio.emit('function_response', {'result': connectivity_result})
             return False
     
-    # Test connection
+    # Test connection with M115 command
     try:
-        global_robot.gohome()
+        global_robot.printer.write("M115\n".encode())
+        response = global_robot.printer.readline().decode()
+        if not ("ok" in response.lower() or "FIRMWARE_NAME" in response):
+            raise Exception("Invalid response from printer")
         connection_failures = 0  # Reset counter on successful connection
     except Exception as e:
         connection_failures += 1
@@ -233,9 +241,12 @@ def c3dp_test_connectivity(complete_test=False):
         global global_robot
         if global_robot is not None:
             try:
-                global_robot.gohome()  # Test existing connection
-                result = "3D Printer connection already established and working well."
-                return True, result
+                # Test existing connection with M115 command
+                global_robot.printer.write("M115\n".encode())
+                response = global_robot.printer.readline().decode()
+                if "ok" in response.lower() or "FIRMWARE_NAME" in response:
+                    result = "3D Printer connection already established and working well."
+                    return True, result
             except:
                 # If existing connection fails, clean it up
                 try:
@@ -247,16 +258,21 @@ def c3dp_test_connectivity(complete_test=False):
         # Try to establish new connection
         r = SamplePrepEnder3(c3dp_com_port)
         try:
-            r.gohome()  # Test if connection is actually working
-            global_robot = r  # Save working connection
-            result = "3D Printer connection established and working well."
-            return True, result
+            # Test new connection with M115 command
+            r.printer.write("M115\n".encode())
+            response = r.printer.readline().decode()
+            if "ok" in response.lower() or "FIRMWARE_NAME" in response:
+                global_robot = r  # Save working connection
+                result = "3D Printer connection established and working well."
+                return True, result
+            else:
+                raise Exception("Invalid response from printer")
         except:
             try:
                 r.disconnect()
             except:
                 pass
-            raise Exception("Connected but failed to home")
+            raise Exception("Connected but failed to communicate")
 
     except Exception as var_error:
         if complete_test:
@@ -268,6 +284,41 @@ def c3dp_test_connectivity(complete_test=False):
             result = "It was not possible to connect to the printer. Test the connectivity on the machine test page."
         print(result)
         return False, result
+    
+def handle_control_panel_operation(operation_func, *args, **kwargs):
+    # Check control panel status
+    status = control_panel_get_macstat()
+    
+    if "SHUTDWN" in status:
+        print("Control panel is shutdown. Attempting to start...")
+        socketio.emit('function_response', {'result': "Control panel is shutdown. Attempting to start..."})
+        
+        # Try to start the panel
+        control_panel_standby()
+        time.sleep(STANDBY_WAIT)
+        
+        # Check status again
+        status = control_panel_get_macstat()
+        if "STANDBY" not in status:
+            error_msg = "Failed to start control panel"
+            print(error_msg)
+            socketio.emit('function_response', {'result': error_msg})
+            return False
+            
+    if "STANDBY" not in status:
+        error_msg = f"Control panel is not ready. Current status: {status}"
+        print(error_msg)
+        socketio.emit('function_response', {'result': error_msg})
+        return False
+        
+    # If we get here, the panel is ready, execute the operation
+    try:
+        return operation_func(*args, **kwargs)
+    except Exception as e:
+        error_msg = f"Operation failed: {e}"
+        print(error_msg)
+        socketio.emit('function_response', {'result': error_msg})
+        return False
 
 def ping(ping_ip):
     try:
@@ -298,14 +349,23 @@ def c3dp_test_connectivity_machine_test_page():
 def control_panel_standby():
     return send_plc_command("STANDBY")
 
+def control_panel_get_macstat():
+    return send_plc_command("MACSTAT")
+
 def control_panel_shutdown():
     return send_plc_command("SHUTDWN")
 
 def control_panel_sem_stage_open():
-    return send_plc_command(f"SEMSTORG{sem_stage_opened}")
+    def _stage_open_operation():
+        return send_plc_command(f"SEMSTORG{sem_stage_opened}")
+    
+    return handle_control_panel_operation(_stage_open_operation)
 
 def control_panel_sem_stage_close():
-    return send_plc_command(f"SEMSTORG{sem_stage_closed}")
+    def _stage_close_operation():
+        return send_plc_command(f"SEMSTORG{sem_stage_closed}")
+    
+    return handle_control_panel_operation(_stage_close_operation)
 
 def control_panel_tem_grid_holder_open():
     return send_plc_command(f"TEMPREPL{tem_grid_holder_opened}")
@@ -411,7 +471,7 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
 
             try:
                 robot.gohome()
-                control_panel_standby()
+                
             except Exception as var_error:
                 print(f"An error occurred: {var_error}")
                 socketio.emit('function_response', {'result': f"An error occurred: {var_error}"})
@@ -502,7 +562,11 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
             socketio.emit('function_response', {'result': f"Error in process: {e}"})
             return False
 
-    return handle_robot_operation(_sem_operation, voltage, c_height, distance, etime, origin, destination)
+    return handle_control_panel_operation(
+        lambda: handle_robot_operation(
+            _sem_operation, voltage, c_height, distance, etime, origin, destination
+        )
+    )
 
 def tem_process_action(voltage, c_height, distance, etime, origin, destination):
     print(f"TEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}")
