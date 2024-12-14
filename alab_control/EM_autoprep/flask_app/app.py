@@ -411,20 +411,19 @@ def device_step_zero():
 def device_step_final(robot=None):
     def _final_operation(robot):
         try:
-            robot.moveto(*robot.intermediate_pos["ZHOME"])
-            robot.gohome()
+            # Set machine to standby
             control_panel_standby()
             
-            # Call device_extend_bed through the new system
-            if not device_extend_bed():
-                raise Exception("Failed to extend bed")
+            # Extending the bed always homes Z
+            if device_extend_bed():
+                print("Sample preparation completed successfully.")
+                socketio.emit('function_response', {'result': "Sample preparation completed successfully."})
+                return True
+            else:
+                raise Exception("Bed extension failed")
                 
-            print("Sample preparation completed successfully.")
-            socketio.emit('function_response', {'result': "Sample preparation completed successfully."})
-            return True
-            
         except Exception as e:
-            error_message = f"Error in final steps: {e}"
+            error_message = f"Error in final steps: {str(e)}"
             print(error_message)
             socketio.emit('function_response', {'result': error_message})
             return False
@@ -438,20 +437,32 @@ def device_step_final(robot=None):
 
 def device_extend_bed():
     def _extend_operation(robot):
-        print("3DP bed extension requested.")
-        socketio.emit('function_response', {'result': "3DP bed extension requested."})
-        
         try:
-            if device_step_zero():
+            print("3DP bed extension requested.")
+            socketio.emit('function_response', {'result': "3DP bed extension requested."})
+            
+            # Get current position
+            current_pos = robot.get_position()
+            zhome_pos = robot.intermediate_pos["ZHOME"]
+            
+            print(f"Current position: {current_pos}")
+            print(f"ZHOME position: {zhome_pos}")
+            
+            # Check if we're not at ZHOME
+            if not all(abs(current_pos[i] - zhome_pos[i]) < 0.1 for i in range(3)):  # 0.1mm tolerance
+                print("Not at ZHOME position. Moving to ZHOME first...")
+                socketio.emit('function_response', {'result': "Moving to ZHOME position..."})
                 robot.speed = SPEED_NORMAL
-                robot.moveto(*robot.intermediate_pos["BED_EXTENDED"])
-                print("3DP bed extended")
-                socketio.emit('function_response', {'result': "3DP bed extended."})
-                return True
-            else:
-                print("3DP bed couldn't be extended - zero step failed")
-                socketio.emit('function_response', {'result': "3DP bed couldn't be extended - zero step failed"})
-                return False
+                robot.moveto(*robot.intermediate_pos["ZHOME"])
+            
+            # Now extend the bed
+            print("Moving to BED_EXTENDED position...")
+            robot.speed = SPEED_NORMAL
+            robot.moveto(*robot.intermediate_pos["BED_EXTENDED"])
+            
+            print("3DP bed extended successfully")
+            socketio.emit('function_response', {'result': "3DP bed extended."})
+            return True
                 
         except Exception as e:
             error_message = f"3DP bed couldn't be extended: {e}"
