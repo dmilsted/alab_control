@@ -269,7 +269,7 @@ def c3dp_test_connectivity(complete_test=False):
 
         # Try to establish new connection
         try:
-            robot = Ender3(c3dp_com_port)
+            robot = SamplePrepEnder3(c3dp_com_port)
             if robot.test_connection():
                 global_robot = robot
                 return True, "3D Printer connection established successfully."
