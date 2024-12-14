@@ -215,40 +215,37 @@ def handle_robot_operation(operation_func, *args, **kwargs):
     # Initialize robot if needed
     if global_robot is None:
         success, connectivity_result = c3dp_test_connectivity(complete_test=False)
-        if success:
-            global_robot = SamplePrepEnder3(c3dp_com_port)
-        else:
+        if not success:
             print(connectivity_result)
             socketio.emit('function_response', {'result': connectivity_result})
             return False
     
-    # Test connection with M115 command
+    # Test existing connection
     try:
-        global_robot.printer.write("M115\n".encode())
-        response = global_robot.printer.readline().decode()
-        if not ("ok" in response.lower() or "FIRMWARE_NAME" in response):
-            raise Exception("Invalid response from printer")
-        connection_failures = 0  # Reset counter on successful connection
-    except Exception as e:
-        connection_failures += 1
-        if connection_failures >= FAILURE_THRESHOLD:
-            print(f"Connection failed {connection_failures} times. Attempting reset...")
-            socketio.emit('function_response', 
-                {'result': f"Connection failed {connection_failures} times. Attempting reset..."})
-            if not reset_robot_connection():
+        if not global_robot.test_connection():
+            connection_failures += 1
+            if connection_failures >= FAILURE_THRESHOLD:
+                print(f"Connection failed {connection_failures} times. Attempting reset...")
+                socketio.emit('function_response', 
+                    {'result': f"Connection failed {connection_failures} times. Attempting reset..."})
+                success, result = c3dp_test_connectivity(complete_test=False)
+                if not success:
+                    return False
+            else:
+                print(f"Connection failed {connection_failures} times")
+                socketio.emit('function_response', 
+                    {'result': f"Connection failed {connection_failures} times"})
                 return False
-        else:
-            print(f"Connection failed {connection_failures} times")
-            socketio.emit('function_response', 
-                {'result': f"Connection failed {connection_failures} times"})
-            return False
-    
-    # Execute the requested operation
-    try:
-        return operation_func(global_robot, *args, **kwargs)
+        
+        # Reset failure counter on successful connection
+        connection_failures = 0
+        
+        # Execute the requested operation
+        return operation_func(*args, **kwargs)
+        
     except Exception as e:
-        print(f"Operation failed: {e}")
-        socketio.emit('function_response', {'result': f"Operation failed: {e}"})
+        print(f"Error during operation: {str(e)}")
+        socketio.emit('function_response', {'result': f"Error during operation: {str(e)}"})
         return False
 
 def c3dp_test_connectivity(complete_test=False):
