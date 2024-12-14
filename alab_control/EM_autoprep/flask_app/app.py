@@ -459,7 +459,10 @@ def device_extend_bed():
             socketio.emit('function_response', {'result': error_message})
             return False
             
-    return handle_robot_operation(_extend_operation)
+    return handle_robot_operation(
+        _extend_operation,
+        robot=global_robot
+    )
 
 def sem_process_action(voltage, c_height, distance, etime, origin, destination):
     def _sem_operation(robot, voltage, c_height, distance, etime, origin, destination):
@@ -566,7 +569,14 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
 
     return handle_control_panel_operation(
         lambda: handle_robot_operation(
-            _sem_operation, voltage, c_height, distance, etime, origin, destination
+            _sem_operation, 
+            robot=global_robot,
+            voltage=voltage, 
+            c_height=c_height, 
+            distance=distance, 
+            etime=etime, 
+            origin=origin, 
+            destination=destination
         )
     )
 
