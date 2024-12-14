@@ -103,41 +103,42 @@ class SamplePrepEnder3(Ender3):
 # Define action functions
 def send_plc_command(message):
     print('Sending to PLC >> ' + message)  # Print to Python terminal
-    socketio.emit('function_response', {'result': 'Sending to PLC >> ' + message})  # Emit to webpage terminal
+    socketio.emit('function_response', {'result': 'Sending to PLC >> ' + message})
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(5)  # Set a timeout for the connection
+            s.settimeout(5)
             s.connect((plc_ip, plc_port))
             s.sendall(message.encode())
+            data = s.recv(1024)
+            decoded = data.decode('utf-8')
             
-            # Initialize variables for receiving complete message
-            complete_data = []
-            while True:
+            # Debug logging
+            print(f'Raw received data (length: {len(data)}): {data}')
+            print(f'Decoded data (length: {len(decoded)}): {decoded}')
+            
+            if 'MACSTAT' in decoded:
+                # Try to receive additional data
                 try:
-                    data = s.recv(1024)
-                    if not data:  # Connection closed by server
-                        break
-                    complete_data.append(data)
-                    # If we've received the end of the message, break
-                    if b'ok' in data or len(data) < 1024:
-                        break
+                    additional_data = s.recv(1024)
+                    if additional_data:
+                        decoded += additional_data.decode('utf-8')
+                        print(f'Additional data received: {additional_data.decode("utf-8")}')
                 except socket.timeout:
-                    break
+                    print("No additional data after MACSTAT")
 
-            decoded = b''.join(complete_data).decode('utf-8')
-            print('Socket reply>>' + decoded)  # Print to Python terminal
-            socketio.emit('function_response', {'result': decoded})  # Emit to webpage terminal
+            print('Socket reply>>' + decoded)
+            socketio.emit('function_response', {'result': decoded})
             return decoded
             
     except socket.timeout:
         error_message = "No response from the server (timeout)."
-        print(error_message)  # Print to Python terminal
-        socketio.emit('function_response', {'result': error_message})  # Emit to webpage terminal
+        print(error_message)
+        socketio.emit('function_response', {'result': error_message})
         return error_message
     except socket.error as e:
         error_message = f"Socket error: {e}"
-        print(error_message)  # Print to Python terminal
-        socketio.emit('function_response', {'result': error_message})  # Emit to webpage terminal
+        print(error_message)
+        socketio.emit('function_response', {'result': error_message})
         return error_message
 
 
