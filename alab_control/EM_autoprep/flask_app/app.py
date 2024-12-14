@@ -109,11 +109,26 @@ def send_plc_command(message):
             s.settimeout(5)  # Set a timeout for the connection
             s.connect((plc_ip, plc_port))
             s.sendall(message.encode())
-            data = s.recv(1024)
-            decoded = data.decode('utf-8')
+            
+            # Initialize variables for receiving complete message
+            complete_data = []
+            while True:
+                try:
+                    data = s.recv(1024)
+                    if not data:  # Connection closed by server
+                        break
+                    complete_data.append(data)
+                    # If we've received the end of the message, break
+                    if b'ok' in data or len(data) < 1024:
+                        break
+                except socket.timeout:
+                    break
+
+            decoded = b''.join(complete_data).decode('utf-8')
             print('Socket reply>>' + decoded)  # Print to Python terminal
             socketio.emit('function_response', {'result': decoded})  # Emit to webpage terminal
             return decoded
+            
     except socket.timeout:
         error_message = "No response from the server (timeout)."
         print(error_message)  # Print to Python terminal
