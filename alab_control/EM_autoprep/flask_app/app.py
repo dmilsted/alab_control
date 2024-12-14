@@ -442,18 +442,20 @@ def device_extend_bed():
             socketio.emit('function_response', {'result': "3DP bed extension requested."})
             
             # Get current position
-            current_pos = robot.get_position()
-            zhome_pos = robot.intermediate_pos["ZHOME"]
-            
+            robot.get_current_position()
+            current_pos = robot.position
             print(f"Current position: {current_pos}")
-            print(f"ZHOME position: {zhome_pos}")
             
-            # Check if we're not at ZHOME
-            if not all(abs(current_pos[i] - zhome_pos[i]) < 0.1 for i in range(3)):  # 0.1mm tolerance
-                print("Not at ZHOME position. Moving to ZHOME first...")
-                socketio.emit('function_response', {'result': "Moving to ZHOME position..."})
+            # Check if Z position is safe
+            if current_pos[2] > 15:
+                print("Z position unsafe. Moving to safe position first...")
                 robot.speed = SPEED_NORMAL
-                robot.moveto(*robot.intermediate_pos["ZHOME"])
+                robot.moveto(*robot.intermediate_pos["PRE_EXTEND_POS"])
+            else:
+                # Z is safe, just ensure X is at safe position
+                print("Z position safe. Moving X to safe position...")
+                robot.speed = SPEED_NORMAL
+                robot.moveto(15, current_pos[1], current_pos[2])
             
             # Now extend the bed
             print("Moving to BED_EXTENDED position...")
@@ -569,6 +571,7 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
                 robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
                 robot.speed = SPEED_NORMAL
                 robot.moveto(*robot.intermediate_pos["ZHOME"])
+                robot.moveto(*robot.intermediate_pos["HOME"])
 
             device_step_final(robot)
             return True
