@@ -24,8 +24,8 @@ c3dp_com_port = "COM7"
 # Define numeric values for linear actuators
 sem_stage_opened = "015"
 sem_stage_closed = "180"
-tem_grid_holder_opened = "040"
-tem_grid_holder_closed = "180"
+tem_grid_holder_opened = "000"
+tem_grid_holder_closed = "150"
 
 
 # Define 3D printer constants for safe operation - be careful when changing or the machine might break
@@ -47,8 +47,8 @@ STANDBY_WAIT = 9  # seconds
 # CSV files management variables
 CWD = os.getcwd()
 positions = {}
-#rootpath = os.path.join(CWD, "alab_control","EM_autoprep","Positions") #'\EM_autoprep\Positions\'
-rootpath = os.path.join(CWD, "EM_autoprep","Positions") #'\EM_autoprep\Positions\'
+rootpath = os.path.join(CWD, "alab_control","EM_autoprep","Positions") #'\EM_autoprep\Positions\'
+#rootpath = os.path.join(CWD, "EM_autoprep","Positions") #'\EM_autoprep\Positions\'
 clean_disks_filename = 'disks_tray_clean.csv'
 used_disks_filename = 'disks_tray_used.csv'
 equipment_filename = 'equipment.csv'
@@ -387,12 +387,12 @@ def control_panel_vacuum(destination,status=False):
         if status:
             send_plc_command("TEMPREPVAC1") #temporarily set to TEM pump due to the SEM one being broken right now
         else:
-            send_plc_command("STANDBY")
+            send_plc_command("TEMSTORVAC0") #SEMSTORVAC0
     if destination == "TEM":
         if status:
             send_plc_command("TEMPREPVAC1")
         else:
-            send_plc_command("STANDBY")
+            send_plc_command("TEMSTORVAC0")
 
 def device_step_zero():
     def _zero_operation(robot):
@@ -599,8 +599,8 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
                 robot.moveto(*robot.intermediate_pos["ZHOME"])
                 print("Checking if stub was picked...")
                 socketio.emit('function_response', {'result': "Checking if stub was picked..."})
-                robot.moveto(*robot.equipment_pos["LASERSEM"])
-                robot.moveto(*robot.equipment_pos["LASERSEM_Z1"])
+                robot.moveto(*robot.equipment_pos["LASER_SEM"])
+                robot.moveto(*robot.equipment_pos["LASER_SEM_Z1"])
 
                 if control_panel_laser_status() == "LASER1":
                     print("Stub was picked!")
@@ -616,7 +616,7 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
 
             if stub_picked:
                 robot.moveto(*robot.intermediate_pos["ZHOME"])
-                robot.moveto(*robot.intermediate_pos["CHARGER"])
+                robot.moveto(*robot.intermediate_pos["CHARGER_SEM"])
                 robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height))
 
                 socketio.emit('function_response', {'result': f"Setting at: {MEASURED_BASE_HEIGHT - int(c_height)} mm."})
@@ -689,6 +689,10 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination):
 
             grid_pick_trials = 0
             grid_picked = False
+
+            # for now, sending direct commands. This must be changed to a function to standardise the code
+            control_panel_tem_grid_holder_open()
+            time.sleep(1.5)
             control_panel_vacuum("TEM",True)
             while True:
                 if grid_pick_trials > 2:
@@ -700,24 +704,24 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination):
                     print("Trying to pick the grid...")
                     socketio.emit('function_response', {'result': "Trying to pick the grid..."})
 
-                robot.moveto(*robot.clean_stub_pos[origin])
+                robot.moveto(*robot.clean_disk_pos[origin])
                 # Descending needle
-                robot.moveto(*robot.clean_stub_pos["STRAY_Z1"])
+                robot.moveto(*robot.clean_disk_pos["TCTRAY_Z1"])
                 robot.speed = SPEED_LOW
                 
                 # Descending needle, slower speed
-                robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+                robot.moveto(*robot.clean_disk_pos["TCTRAY_Z2"])
                 robot.speed = SPEED_VLOW
                 
                 # Trying to collect grid delicately
-                robot.moveto(*robot.clean_stub_pos["STRAY_Z3"])
-                robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+                robot.moveto(*robot.clean_disk_pos["TCTRAY_Z3"])
+                robot.moveto(*robot.clean_disk_pos["TCTRAY_Z2"])
                 robot.speed = SPEED_NORMAL
                 robot.moveto(*robot.intermediate_pos["ZHOME"])
                 print("Checking if grid was picked...")
                 socketio.emit('function_response', {'result': "Checking if grid was picked..."})
-                robot.moveto(*robot.equipment_pos["LASERTEM"])
-                robot.moveto(*robot.equipment_pos["LASERTEM_Z1"])
+                robot.moveto(*robot.equipment_pos["LASER_TEM"])
+                robot.moveto(*robot.equipment_pos["LASER_TEM_Z1"])
 
                 if control_panel_laser_status() == "LASER1":
                     print("Grid was picked!")
@@ -733,7 +737,10 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination):
 
             if grid_picked:
                 robot.moveto(*robot.intermediate_pos["ZHOME"])
-                robot.moveto(*robot.intermediate_pos["CHARGER"])
+                time.sleep(1)
+                control_panel_tem_grid_holder_close()
+                time.sleep(1)
+                robot.moveto(*robot.intermediate_pos["CHARGER_TEM"])
                 robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height))
 
                 socketio.emit('function_response', {'result': f"Setting at: {MEASURED_BASE_HEIGHT - int(c_height)} mm."})
@@ -745,22 +752,29 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination):
                 time.sleep(int(etime)/1000+2)
                 robot.moveto(*robot.intermediate_pos["ZHOME"])
                 
-                print(f"Delivering grid to {origin}.")
-                socketio.emit('function_response', {'result': f"Delivering grid to {origin}."})
-                robot.moveto(*robot.clean_stub_pos[origin])
-                robot.moveto(*robot.clean_stub_pos["STRAY_Z1"])
+                print(f"Delivering grid to {destination}.")
+                socketio.emit('function_response', {'result': f"Delivering grid to {destination}."})
+                control_panel_tem_grid_holder_open()
+                time.sleep(1)
+                robot.moveto(*robot.used_disk_pos[destination])
+                robot.moveto(*robot.used_disk_pos["TETRAY_Z1"])
                 robot.speed = SPEED_LOW
-                robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+                robot.moveto(*robot.used_disk_pos["TETRAY_Z2"])
                 robot.speed = SPEED_VLOW
-                robot.moveto(*robot.clean_stub_pos["STRAY_Z3"])
+                robot.moveto(*robot.used_disk_pos["TETRAY_Z3"])
                 control_panel_vacuum("TEM",False)
                 time.sleep(PAUSE_VAC)
-                robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+                robot.moveto(*robot.used_disk_pos["TETRAY_Z2"])
                 robot.speed = SPEED_NORMAL
                 robot.moveto(*robot.intermediate_pos["ZHOME"])
+                time.sleep(1)
+                control_panel_tem_grid_holder_close()
+                time.sleep(1)
                 robot.moveto(*robot.intermediate_pos["HOME"])
+                
 
             device_step_final(robot)
+
             return True
 
         except Exception as e:
@@ -786,6 +800,7 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination):
 function_map = {
     'button': button_action,
     'sem_process': sem_process_action,
+    'tem_process': tem_process_action,
     'c3dp_test_connectivity': c3dp_test_connectivity,
     'c3dp_test_connectivity_machine_test_page': c3dp_test_connectivity_machine_test_page,
     'server_test_connectivity': server_test_connectivity,
@@ -866,6 +881,15 @@ def dispatch_action(data):
         if function_type == 'button':
             return action_function(identifier)
         elif function_type == 'sem_process':
+            return action_function(
+                voltage=data.get('voltage'),
+                c_height=data.get('c_height'),
+                distance=data.get('distance'),
+                etime=data.get('time'),
+                origin=data.get('origin'),
+                destination=data.get('destination')
+            )
+        elif function_type == 'tem_process':
             return action_function(
                 voltage=data.get('voltage'),
                 c_height=data.get('c_height'),
