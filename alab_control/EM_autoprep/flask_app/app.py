@@ -47,7 +47,8 @@ STANDBY_WAIT = 9  # seconds
 # CSV files management variables
 CWD = os.getcwd()
 positions = {}
-rootpath = os.path.join(CWD, "alab_control","EM_autoprep","Positions") #'\EM_autoprep\Positions\'
+#rootpath = os.path.join(CWD, "alab_control","EM_autoprep","Positions") #'\EM_autoprep\Positions\'
+rootpath = os.path.join(CWD, "EM_autoprep","Positions") #'\EM_autoprep\Positions\'
 clean_disks_filename = 'disks_tray_clean.csv'
 used_disks_filename = 'disks_tray_used.csv'
 equipment_filename = 'equipment.csv'
@@ -477,6 +478,73 @@ def device_extend_bed():
         robot=global_robot
     )
 
+def send_manual_plc_command(command):
+    try:
+        response = send_plc_command(command)
+        
+        # Check if the response contains error messages
+        if "error" in response.lower() or "timeout" in response.lower():
+            print(f"PLC command failed: {response}")
+            socketio.emit('function_response', {'result': f"PLC command failed: {response}"})
+            return False
+        else:
+            print(f"PLC command response: {response}")
+            socketio.emit('function_response', {'result': response})
+            return True
+            
+    except Exception as e:
+        error_message = f"Error in send_manual_plc_command: {str(e)}"
+        print(error_message)
+        socketio.emit('function_response', {'result': error_message})
+        return False
+
+def move_robot_manual(x, y, z):
+    result = "Requesting robot to move to: x=" + x + " y=" + y + " z=" + z
+    print(result)
+    socketio.emit('function_response', {'result': result})
+    def _move_operation(robot):
+        try:
+            # Convert string inputs to float
+            x_pos = float(x)
+            y_pos = float(y)
+            z_pos = float(z)
+            
+            # Move robot to specified position
+            robot.moveto(x_pos, y_pos, z_pos)
+            result = "Robot moved successfully to position"
+            print(result)
+            socketio.emit('function_response', {'result': result})
+            return True
+            
+        except ValueError:
+            error = "Error: Please enter valid numbers for coordinates"
+            print(error)
+            socketio.emit('function_response', {'result': error})
+            return False
+        except Exception as e:
+            error = f"Error during movement: {str(e)}"
+            print(error)
+            socketio.emit('function_response', {'result': error})
+            return False
+
+    return handle_robot_operation(_move_operation)
+
+def home_robot_manual():
+    def _home_operation(robot):
+        try:
+            robot.gohome()
+            result = "Robot successfully homed"
+            print(result)
+            socketio.emit('function_response', {'result': result})
+            return True
+        except Exception as e:
+            error = f"Error during homing: {str(e)}"
+            print(error)
+            socketio.emit('function_response', {'result': error})
+            return False
+
+    return handle_robot_operation(_home_operation)
+
 def sem_process_action(voltage, c_height, distance, etime, origin, destination):
     def _sem_operation(robot, voltage, c_height, distance, etime, origin, destination):
         try:
@@ -595,95 +663,121 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
     )
 
 def tem_process_action(voltage, c_height, distance, etime, origin, destination):
-    print(f"TEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}")
-    socketio.emit('function_response', {'result': f"TEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}"})
-    r = SamplePrepEnder3(c3dp_com_port)
+    def _tem_operation(robot, voltage, c_height, distance, etime, origin, destination):
+        try:
+            # Format voltage and time to 5 characters with leading zeros
+            voltage = f"{int(voltage):05d}"
+            etime = f"{int(etime):05d}"
 
-    # TODO: The code should test each received variable. e.g., if distance is not beyond safety, if origin and destination exists, etc.
-    ''' THIS FUNCTION IS TOO OUTDATED AND NEEDS TO BE FIXED USING THE SAME ALGORITHM AND STYLE OF THE SEM VERSION BEFORE RUNNING
-    if device_step_zero():
-        r.speed = SPEED_NORMAL
-        r.moveto(*r.intermediate_pos["ZHOME"])
-        print(f"Collecting grid from {origin}")
-        socketio.emit('function_response', {'result': f"Collecting grid from {origin}."})
+            print(f"TEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}")
+            socketio.emit('function_response', {'result': f"TEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}"})
 
-        grid_pick_trials = 0
-        grid_picked = False
-        control_panel_vacuum("TEM",True)
-        while True:
-            if grid_pick_trials > 2:
-                print("Grid not picked 3 times in a row. Aborted.")
-                socketio.emit('function_response', {'result': "Grid not picked 3 times in a row. Aborted."})
+            try:
+                robot.gohome()
+                
+            except Exception as var_error:
+                print(f"An error occurred: {var_error}")
+                socketio.emit('function_response', {'result': f"An error occurred: {var_error}"})
+                return False
+
+            robot.speed = SPEED_NORMAL
+            robot.moveto(*robot.intermediate_pos["ZHOME"])
+            print(f"Collecting grid from {origin}")
+            socketio.emit('function_response', {'result': f"Collecting grid from {origin}."})
+
+            grid_pick_trials = 0
+            grid_picked = False
+            control_panel_vacuum("TEM",True)
+            while True:
+                if grid_pick_trials > 2:
+                    print("Grid not picked 3 times in a row. Aborted.")
+                    socketio.emit('function_response', {'result': "Grid not picked 3 times in a row. Aborted."})
+                    control_panel_vacuum("TEM",False)
+                    break
+                else:
+                    print("Trying to pick the grid...")
+                    socketio.emit('function_response', {'result': "Trying to pick the grid..."})
+
+                robot.moveto(*robot.clean_stub_pos[origin])
+                # Descending needle
+                robot.moveto(*robot.clean_stub_pos["STRAY_Z1"])
+                robot.speed = SPEED_LOW
+                
+                # Descending needle, slower speed
+                robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+                robot.speed = SPEED_VLOW
+                
+                # Trying to collect grid delicately
+                robot.moveto(*robot.clean_stub_pos["STRAY_Z3"])
+                robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+                robot.speed = SPEED_NORMAL
+                robot.moveto(*robot.intermediate_pos["ZHOME"])
+                print("Checking if grid was picked...")
+                socketio.emit('function_response', {'result': "Checking if grid was picked..."})
+                robot.moveto(*robot.equipment_pos["LASERTEM"])
+                robot.moveto(*robot.equipment_pos["LASERTEM_Z1"])
+
+                if control_panel_laser_status() == "LASER1":
+                    print("Grid was picked!")
+                    socketio.emit('function_response', {'result': "Grid was picked!"})
+                    grid_picked = True
+                    robot.moveto(*robot.intermediate_pos["ZHOME"])
+                    break
+                else:
+                    print("Grid was not detected. Trying again...")
+                    socketio.emit('function_response', {'result': "Grid was not detected. Trying again..."})
+                    robot.moveto(*robot.intermediate_pos["ZHOME"])
+                    grid_pick_trials = grid_pick_trials + 1
+
+            if grid_picked:
+                robot.moveto(*robot.intermediate_pos["ZHOME"])
+                robot.moveto(*robot.intermediate_pos["CHARGER"])
+                robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height))
+
+                socketio.emit('function_response', {'result': f"Setting at: {MEASURED_BASE_HEIGHT - int(c_height)} mm."})
+                robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height) + int(distance))
+                socketio.emit('function_response', {'result': f"Exposing at: {MEASURED_BASE_HEIGHT - int(c_height) + int(distance)} mm."})
+                print(f"Grid will be exposed to {voltage} kV for {etime} ms.")
+                socketio.emit('function_response', {'result': f"Grid will be exposed to {voltage} kV for {etime} ms."})
+                control_panel_hvps_setting(voltage,etime)
+                time.sleep(int(etime)/1000+2)
+                robot.moveto(*robot.intermediate_pos["ZHOME"])
+                
+                print(f"Delivering grid to {origin}.")
+                socketio.emit('function_response', {'result': f"Delivering grid to {origin}."})
+                robot.moveto(*robot.clean_stub_pos[origin])
+                robot.moveto(*robot.clean_stub_pos["STRAY_Z1"])
+                robot.speed = SPEED_LOW
+                robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+                robot.speed = SPEED_VLOW
+                robot.moveto(*robot.clean_stub_pos["STRAY_Z3"])
                 control_panel_vacuum("TEM",False)
-                break
-            else:
-                print("Trying to pick the grid...")
-                socketio.emit('function_response', {'result': "Trying to pick the grid..."})
+                time.sleep(PAUSE_VAC)
+                robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+                robot.speed = SPEED_NORMAL
+                robot.moveto(*robot.intermediate_pos["ZHOME"])
+                robot.moveto(*robot.intermediate_pos["HOME"])
 
-            r.moveto(*r.clean_stub_pos[origin])
-            # Descending needle
-            r.moveto(*r.clean_stub_pos["STRAY_Z1"])
-            r.speed = SPEED_LOW
-            
-            # Descending needle, slower speed
-            r.moveto(*r.clean_stub_pos["STRAY_Z2"])
-            r.speed = SPEED_VLOW
-            
-            # Trying to collect stub delicately
-            r.moveto(*r.clean_stub_pos["STRAY_Z3"])
-            r.moveto(*r.clean_stub_pos["STRAY_Z2"])
-            r.speed = SPEED_NORMAL
-            r.moveto(*r.intermediate_pos["ZHOME"])
-            print("Checking if grid was picked...")
-            socketio.emit('function_response', {'result': "Checking if grid was picked..."})
-            r.moveto(*r.equipment_pos["LASERTEM"])
-            r.moveto(*r.equipment_pos["LASERTEM_Z1"])
+            device_step_final(robot)
+            return True
 
-            if control_panel_laser_status() == "LASER1":
-            #if True: #for debugging, delete!
-                print("Grid was picked!")
-                socketio.emit('function_response', {'result': "Grid was picked!"})
-                stub_picked = True
-                r.moveto(*r.intermediate_pos["ZHOME"])
-                break
-            else:
-                print("Grid was not detected. Trying again...")
-                socketio.emit('function_response', {'result': ".Grid was not detected. Trying again..."})
-                r.moveto(*r.intermediate_pos["ZHOME"])
-                grid_pick_trials = grid_pick_trials+1
+        except Exception as e:
+            print(f"Error in process: {e}")
+            socketio.emit('function_response', {'result': f"Error in process: {e}"})
+            return False
 
-        if stub_picked:
-            r.moveto(*r.intermediate_pos["ZHOME"])
-            r.moveto(*r.intermediate_pos["CHARGER"])
-            r.moveto(z=MEASURED_BASE_HEIGHT - int(c_height))
-
-            #TODO: check if the exposition heights make sense. It seems it is reversed (going up when it should go down, and vice -versa)
-            socketio.emit('function_response', {'result': f"Setting at: {MEASURED_BASE_HEIGHT - int(c_height)} mm."})
-            r.moveto(z=MEASURED_BASE_HEIGHT -  int(c_height) + int(distance))
-            socketio.emit('function_response', {'result': f"Exposing at: {MEASURED_BASE_HEIGHT - int(c_height) + int(distance)} mm."})
-            print(f"Grid will be exposed to {voltage} kV for {etime} ms.")
-            socketio.emit('function_response', {'result': f"Grid will be exposed to {voltage} kV for {etime} ms."})
-            control_panel_hvps_setting(voltage,etime)
-            time.sleep(int(etime)/1000+2)
-            r.moveto(*r.intermediate_pos["ZHOME"])
-            
-            print(f"Delivering grid to {origin}.")
-            socketio.emit('function_response', {'result': f"Delivering grid to {origin}."})
-            r.moveto(*r.clean_stub_pos[origin])
-            r.moveto(*r.clean_stub_pos["STRAY_Z1"])
-            r.speed = SPEED_LOW
-            r.moveto(*r.clean_stub_pos["STRAY_Z2"])
-            r.speed = SPEED_VLOW
-            r.moveto(*r.clean_stub_pos["STRAY_Z3"])
-            control_panel_vacuum("TEM",False)
-            time.sleep(PAUSE_VAC)
-            r.moveto(*r.clean_stub_pos["STRAY_Z2"])
-            r.speed = SPEED_NORMAL
-            r.moveto(*r.intermediate_pos["ZHOME"])
-
-        device_step_final() '''
-
-    return
+    return handle_control_panel_operation(
+        lambda: handle_robot_operation(
+            _tem_operation, 
+            robot=global_robot,
+            voltage=voltage, 
+            c_height=c_height, 
+            distance=distance, 
+            etime=etime, 
+            origin=origin, 
+            destination=destination
+        )
+    )
 
 
 # Map function names to handlers
@@ -699,7 +793,10 @@ function_map = {
     'control_panel_sem_stage_close': control_panel_sem_stage_close,
     'control_panel_tem_grid_holder_open': control_panel_tem_grid_holder_open,
     'control_panel_tem_grid_holder_close': control_panel_tem_grid_holder_close,
-    'device_extend_bed': device_extend_bed
+    'device_extend_bed': device_extend_bed,
+    'robot_manual_move': move_robot_manual,
+    'robot_manual_home': home_robot_manual,
+    'send_manual_plc_command': send_manual_plc_command
 }
 
 @app.route('/get_page/<page>')
@@ -755,6 +852,7 @@ def handle_function():
     
 
 def dispatch_action(data):
+    print("Received data:", data)  # debug line
     function_type = data.get('function')
     identifier = data.get('id')
     action_function = function_map.get(function_type)
@@ -794,6 +892,18 @@ def dispatch_action(data):
             return action_function()
         elif function_type == 'device_extend_bed':
             return action_function()
+        elif function_type == 'robot_manual_move':
+            return action_function(
+                x=data.get('x'),
+                y=data.get('y'),
+                z=data.get('z')
+            )
+        elif function_type == 'robot_manual_home':
+            return action_function()
+        elif function_type == 'send_manual_plc_command':
+                return action_function(
+                    command=data.get('command')
+                )
         else:
             return "Function type not supported"
     except Exception as e:
