@@ -498,8 +498,8 @@ def send_manual_plc_command(command):
         socketio.emit('function_response', {'result': error_message})
         return False
 
-def move_robot_manual(x, y, z):
-    result = "Requesting robot to move to: x=" + x + " y=" + y + " z=" + z
+def move_robot_manual(x, y, z, c3dp_speed):
+    result = "Requesting robot to move to: x=" + x + " y=" + y + " z=" + z + " at speed=" + c3dp_speed
     print(result)
     socketio.emit('function_response', {'result': result})
     def _move_operation(robot):
@@ -508,8 +508,10 @@ def move_robot_manual(x, y, z):
             x_pos = float(x)
             y_pos = float(y)
             z_pos = float(z)
+            c3dp_speed_manual = float(c3dp_speed)
             
             # Move robot to specified position
+            robot.speed = c3dp_speed_manual
             robot.moveto(x_pos, y_pos, z_pos)
             result = "Robot moved successfully to position"
             print(result)
@@ -896,7 +898,8 @@ def dispatch_action(data):
             return action_function(
                 x=data.get('x'),
                 y=data.get('y'),
-                z=data.get('z')
+                z=data.get('z'),
+                c3dp_speed = data.get('c3dp_speed')
             )
         elif function_type == 'robot_manual_home':
             return action_function()

@@ -188,14 +188,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 const x = document.getElementById('x-coord').value;
                 const y = document.getElementById('y-coord').value;
                 const z = document.getElementById('z-coord').value;
-                
-                console.log("Sending values:", x, y, z);
+                const c3dp_speed = document.getElementById('3dp-manual-speed').value;
                 
                 const data = {
                     function: 'robot_manual_move',
                     x: x,
                     y: y,
-                    z: z
+                    z: z,
+                    c3dp_speed: c3dp_speed
                 };
                 
                 window.callFunction(data);

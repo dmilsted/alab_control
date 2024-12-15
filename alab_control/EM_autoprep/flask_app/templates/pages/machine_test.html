@@ -1,83 +1,136 @@
 <div class="form-card">
     <h1 class="main-title">Machine Test</h1>
-    </div>
-    <div class="form-card">
-        <h2 class="main-subtitle">Communication tests</h2>
+</div>
+<div class="form-card">
+    <h2 class="main-subtitle">Communication tests</h2>
     <div class="button-group">
-        <button class="btn btn-primary" data-function="c3dp_test_connectivity_machine_test_page" id="button1">3D-Printer: <br/><br/> test connectivity</button>
-        <button class="btn btn-primary" data-function="control_panel_get_macstat" data-id="button2">Control panel: <br/><br/>send "MACSTAT"</button>
-        <button class="btn btn-primary" data-function="server_test_connectivity" data-id="button3">Server: <br/><br/> send "ping"</button>
-    </div> </div>
-    <div class="form-card">
-        <h2 class="main-subtitle">Manual use and maintenance</h2>
+        <button class="btn btn-primary" data-function="c3dp_test_connectivity_machine_test_page"
+            id="button1">3D-Printer: <br /><br /> test connectivity</button>
+        <button class="btn btn-primary" data-function="control_panel_get_macstat" data-id="button2">Control panel:
+            <br /><br />send "MACSTAT"</button>
+        <button class="btn btn-primary" data-function="server_test_connectivity" data-id="button3">Server: <br /><br />
+            send "ping"</button>
+    </div>
+</div>
+<div class="form-card">
+    <h2 class="main-subtitle">Manual use and maintenance</h2>
     <div class="button-group">
         <button class="btn btn-primary" data-function="device_extend_bed" id="button4">Extend bed</button>
-        <button class="btn btn-primary" data-function="control_panel_sem_stage_open" data-id="button5">Uncover SEM stage</button>
-        <button class="btn btn-primary" data-function="control_panel_sem_stage_close" data-id="button6">Cover SEM stage</button>
-        <button class="btn btn-primary" data-function="control_panel_tem_grid_holder_open" data-id="button7">Open TEM grid cover</button>
-        <button class="btn btn-primary" data-function="control_panel_tem_grid_holder_close" data-id="button8">Close TEM grid cover</button>
-        <button class="btn btn-primary" data-function="control_panel_standby" data-id="button9">Control panel: <br/><br/> send "standby"</button>
-        <button class="btn btn-primary" data-function="control_panel_shutdown" data-id="button10">Control panel: <br/><br/>send "shutdown"</button>
-    </div></div>
-    <div class="form-card">
-        <h2 class="main-subtitle">Robot - Manual Control</h2>
-        <div class="form-group" style="text-align: center;">
-            <div class="input-group">
-                <label for="x-coord">X:</label>
-                <input type="text" id="x-coord" maxlength="3" style="width: 50px;" placeholder="X">
-                
-                <label for="y-coord">Y:</label>
-                <input type="text" id="y-coord" maxlength="3" style="width: 50px;" placeholder="Y">
-                
-                <label for="z-coord">Z:</label>
-                <input type="text" id="z-coord" maxlength="3" style="width: 50px;" placeholder="Z">
-                
-                <button class="btn btn-primary" data-function="robot_manual_move" id="manual-move-btn">Run</button>
-                <button class="btn btn-primary" data-function="robot_manual_home" id="manual-home-btn">Home 3DP</button>
-            </div>
-        </div>
-        <div class="usage-notes">
-            <p>⚠️ Be sure to move the Z to above 15mm before moving X and Y to any position to ensure that nothing breaks.</p>
+        <button class="btn btn-primary" data-function="control_panel_sem_stage_open" data-id="button5">Uncover SEM
+            stage</button>
+        <button class="btn btn-primary" data-function="control_panel_sem_stage_close" data-id="button6">Cover SEM
+            stage</button>
+        <button class="btn btn-primary" data-function="control_panel_tem_grid_holder_open" data-id="button7">Open TEM
+            grid cover</button>
+        <button class="btn btn-primary" data-function="control_panel_tem_grid_holder_close" data-id="button8">Close TEM
+            grid cover</button>
+        <button class="btn btn-primary" data-function="control_panel_standby" data-id="button9">Control panel:
+            <br /><br /> send "standby"</button>
+        <button class="btn btn-primary" data-function="control_panel_shutdown" data-id="button10">Control panel:
+            <br /><br />send "shutdown"</button>
+    </div>
+</div>
+<div class="form-card">
+    <h1 class="main-title">Manual Control</h1>
+    <div class="usage-notes" style="text-align: center;">
+        <p><b>⚠️ ⚠️ ⚠️ IMPORTANT ⚠️ ⚠️ ⚠️</b></p>
+        <p>Misusing these functions might break machine parts and people will be angry at you.</p>
+        <p>Only use them if you know what you are doing. You have been warned!</p>
+    </div>
+</div>
+<div class="form-card">
+    <h2 class="main-subtitle">3DP - Direct Control</h2>
+
+    <div class="usage-notes" style="text-align: center;">
+        <p><b>Instructions</b></p>
+        <p>1. Home the 3DP before sending positions</p>
+        <p>2. Always move the head (Z axis) to values below 15 before moving X and Y.</p>
+        <p>3. Do not exceed an speed of 0.5.</p>
+        <p>4. X = head, left and right. 0 = left, 220 = max right.</p>
+        <p>5. Y = bed, back and forth. 0 = back, 220 = max forth.</p>
+        <p>6. Z = head, up and down. 0 = max up, > 0 = down.</p>
+    </div>
+
+    <div class="form-group" style="text-align: center;">
+        <div class="input-group">
+            <br /><br />
+            <label for="x-coord">X:</label>
+            <input type="text" id="x-coord" maxlength="3" style="width: 50px;" placeholder="X">
+
+            <label for="y-coord">Y:</label>
+            <input type="text" id="y-coord" maxlength="3" style="width: 50px;" placeholder="Y">
+
+            <label for="z-coord">Z:</label>
+            <input type="text" id="z-coord" maxlength="3" style="width: 50px;" placeholder="Z">
+
+            <label for="3dp-speed">Speed:</label>
+            <input type="text" id="3dp-manual-speed" maxlength="3" style="width: 50px;" placeholder="0.01 to 0.5" value="0.4">
+            <br /><br />
+
+            <button class="btn btn-primary" data-function="robot_manual_home" id="manual-home-btn">Home 3DP</button>
+            <button class="btn btn-primary" data-function="robot_manual_move" id="manual-move-btn">Send</button>
         </div>
     </div>
-    <div class="form-card">
-        <h2 class="main-subtitle">PLC - Manual Control</h2>
-        <div class="form-group" style="text-align: center;">
-        <!-- Manual Control Section -->
-            <div class="form-group">
-                <h3>Manual Control</h3>
+
+</div>
+<div class="form-card">
+    <h2 class="main-subtitle">PLC - Direct Control</h2>
+
+    <!-- Assisted Manual Control Section -->
+    <div class="form-group" style="text-align: center;">
+        <div class="form-group">
             
-                <div class="input-group">
-                    <input type="text" id="plc-command-input" maxlength="20" style="width: 400px;" placeholder="Type your string here">
-                    <button class="btn btn-primary" data-function="send_manual_plc_command" id="plc-send-btn">Send</button>
-                </div>
+            <div class="usage-notes" style="text-align: center;">
+                <p><b>Instructions</b></p>
+                <p>1. If you know the command you need to send, type it in the input box and click Send.</p>
+                <p>2. If you need assistance, select the command you want to send from the dropdown menu.</p>
+                <p>3. After selecting an option, part of the command will be automatically inserted in the input box.</p>
+                <p>4. Buttons or input boxes will appear to help you to craft your command. Click or type following your needs.</p>
+                <p>5. After the command is finished, you may click on Send to send it to the PLC.</p>
             </div>
-        </div>
-    
-        <!-- Assisted Manual Control Section -->
-        <div class="form-group" style="text-align: center;">
-            <div class="form-group">
+            <div class="usage-notes" style="text-align: center;">
+                <p><b>Important considerations </b></p>
+                <p>⚠️ Be careful to not use the gripper when the head is too low.</p>
+                <p>⚠️ Be careful to not open or close the TEM grid when the Stage cover is retracted.</p>
+                <p>⚠️ Be careful to not cover or uncover the SEM Stage with the head too low, or any element on its way.</p>
+            </div>
+
+
+            <div class="input-group">
                 <h3>Assisted Manual Control</h3>
-                <div class="input-group">
-                    <select id="plc-command-select" style="width: 150px;">
-                        <option value="">Select command...</option>
-                        <option value="standby">Standby</option>
-                        <option value="stage-lid">Stage Lid</option>
-                        <option value="tem-prep">TEM preparation</option>
-                        <option value="tem-storage">TEM storage</option>
-                        <option value="sem-prep">SEM preparation</option>
-                        <option value="sem-storage">SEM Storage</option>
-                        <option value="hvps">HVPS control</option>
-                        <option value="vibration">Vibration Control</option>
-                        <option value="shutdown">Shutdown</option>
-                    </select>
-                </div>
-        
-                <!-- Dynamic content area - will be populated by JavaScript -->
-                <div id="plc-dynamic-controls" class="input-group" style="margin-top: 10px;">
-                    <!-- Dynamic content will be inserted here -->
-                </div>
+                <select id="plc-command-select" style="width: 150px;">
+                    <option value="">Select command...</option>
+                    <option value="standby">Standby</option>
+                    <option value="stage-lid">Stage Lid</option>
+                    <option value="tem-prep">TEM preparation</option>
+                    <option value="tem-storage">TEM storage</option>
+                    <option value="sem-prep">SEM preparation</option>
+                    <option value="sem-storage">SEM Storage</option>
+                    <option value="hvps">HVPS control</option>
+                    <option value="vibration">Vibration Control</option>
+                    <option value="shutdown">Shutdown</option>
+                </select>
+            </div>
+
+            <!-- Dynamic content area - will be populated by JavaScript -->
+            <div id="plc-dynamic-controls" class="input-group" style="margin-top: 10px;">
+                <!-- Dynamic content will be inserted here -->
             </div>
         </div>
     </div>
+
+    <!-- Manual Control Section -->
+    <div class="form-group" style="text-align: center;">
+        <div class="form-group">
+            <h3>Manual Control</h3>
+
+            <div class="input-group">
+                <input type="text" id="plc-command-input" maxlength="20" style="width: 400px;"
+                    placeholder="Type your string here">
+                <button class="btn btn-primary" data-function="send_manual_plc_command" id="plc-send-btn">Send</button>
+            </div>
+        </div>
+    </div>
+
+</div>
 </div>
