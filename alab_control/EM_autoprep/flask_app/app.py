@@ -13,11 +13,11 @@ app = Flask(__name__)
 socketio = SocketIO(app, async_mode='threading')  # Important: Specify async_mode
 
 # Define IPs and ports, and 3DP COM port
-host_ip = "localhost"  # Set to listen on all interfaces
+host_ip = "0.0.0.0"  # Set to listen on all interfaces
 web_port = 8000
 udp_port = 8001
 server_ip = "142.251.214.142" #change to server's IP. This is google :)
-plc_ip = '192.168.0.46'
+plc_ip = '192.168.1.172'
 plc_port = 8888
 c3dp_com_port = "COM7"
 
@@ -385,9 +385,9 @@ def control_panel_hvps_setting(v,t):
 def control_panel_vacuum(destination,status=False):
     if destination == "SEM":
         if status:
-            send_plc_command("TEMPREPVAC1") #temporarily set to TEM pump due to the SEM one being broken right now
+            send_plc_command("SEMPREPVAC1") #temporarily set to TEM pump due to the SEM one being broken right now
         else:
-            send_plc_command("TEMSTORVAC0") #SEMSTORVAC0
+            send_plc_command("SEMSTORVAC0") #SEMSTORVAC0
     if destination == "TEM":
         if status:
             send_plc_command("TEMPREPVAC1")

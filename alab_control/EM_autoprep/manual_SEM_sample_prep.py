@@ -5,7 +5,7 @@ import time
 import sys
 
 # USE THE VARIABLES BELOW TO SETUP YOUR EXPERIMENT #
-EXPOSURE_DISTANCE = 23  #value between -25 and +25, measured in mm, from the top of the crucible
+EXPOSURE_DISTANCE = 13  #value between -25 and +25, measured in mm, from the top of the crucible
 EXPOSURE_VOLTAGE = "10000" #value between 01000 and 30000, measured in voltscc
 EXPOSURE_TIME = "05000" #value between 250 and 99999, measured in millli seconds
 DESTINATION = 0 #0 is to return to stub holder. 1 is to place on phenom stage
