@@ -38,3 +38,36 @@ function updateTEMDestinationAndHighlight(selectedValue) {
     }
 }
 
+function updateSEMStageOriginAndHighlight(selectedValue) {
+    // Reset all SEM tray circles to white
+    const semCircles = document.querySelectorAll("#semTrayContainer circle");
+    semCircles.forEach(circle => circle.setAttribute("fill", "white"));
+
+    // Highlight selected SEM tray circle
+    const selectedSemCircle = document.getElementById(selectedValue);
+    if (selectedSemCircle) {
+        selectedSemCircle.setAttribute("fill", "lightgreen");
+    }
+}
+
+function updateSEMStageDestinationAndHighlight(selectedValue) {
+    // Remove 'selected' class from all circles
+    const allCircles = document.querySelectorAll("#stageContainer circle");
+    allCircles.forEach(circle => {
+        // Only remove the 'selected' class, preserving the base class
+        circle.classList.remove("selected");
+    });
+
+    // Check if selected value is a forbidden position
+    const selectedElement = document.getElementById(selectedValue);
+    if (selectedElement && selectedElement.classList.contains('forbidden-position')) {
+        alert("This position is not available for selection.");
+        return;
+    }
+
+    // Add 'selected' class to the selected circle
+    if (selectedElement) {
+        selectedElement.classList.add("selected");
+        // The circle still maintains its 'selectable-position' class
+    }
+}

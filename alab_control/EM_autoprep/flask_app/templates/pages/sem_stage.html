@@ -1,15 +1,361 @@
 <div class="form-card">
-    <h1>SEM Stage Preparation</h1>
-    
-    <div class="button-group">
-        <button class="btn btn-primary" data-function="button" data-id="stage_up">Move Up</button>
-        <button class="btn btn-primary" data-function="button" data-id="stage_down">Move Down</button>
-        <button class="btn btn-primary" data-function="button" data-id="stage_left">Move Left</button>
-        <button class="btn btn-primary" data-function="button" data-id="stage_right">Move Right</button>
-    </div>
+    <h1 class="main-title">SEM tray to Stage Transfer</h1>
+</div>
 
-    <div class="button-group">
-        <button class="btn btn-secondary" data-function="button" data-id="stage_home">Home Position</button>
-        <button class="btn btn-secondary" data-function="button" data-id="stage_center">Center Stage</button>
+<div class="main-container">
+    <div class="form-card" style="margin-right: 20px;">
+        <h2 class="main-subtitle">Transfer parameters</h2>
+
+        <form id="semToStageForm" onsubmit="event.preventDefault(); submitForm(this);">
+            <input type="hidden" name="function" value="sem_to_stage_process">
+
+            <div class="form-group">
+                <label for="voltage">Exposure Voltage:</label>
+                <input type="text" id="voltage" name="voltage" placeholder="Enter exposure voltage (ms)" value="10000">
+                <small class="form-text text-muted">Minimum: 1000, Maximum: 25000</small>
+            </div>
+
+            <div class="form-group">
+                <label for="c_height">Container height:</label>
+                <input type="text" id="c_height" name="c_height" placeholder="Enter container height (mm)" value="39">
+                <small class="form-text text-muted">Values in mm.</small>
+            </div>
+
+            <div class="form-group">
+                <label for="distance">Vertical shift:</label>
+                <input type="text" id="distance" name="distance" placeholder="Enter Vertical shift distance (mm)"
+                    value="18">
+                <small class="form-text text-muted">Values in mm. Lowest: -25.0, Highest: 25.0</small>
+            </div>
+
+            <div class="form-group">
+                <label for="time">Exposure Time:</label>
+                <input type="text" id="time" name="time" placeholder="Enter exposure time (ms)" value="5000">
+                <small class="form-text text-muted">Minimum: 0, Maximum: 9999</small>
+            </div>
+
+            <div class="form-group">
+                <label for="origin">Origin (SEM Tray):</label>
+                <select id="origin" name="origin" onchange="updateSEMStageOriginAndHighlight(this.value)">
+                    <option value="A1">A1</option>
+                    <option value="A2">A2</option>
+                    <option value="A3">A3</option>
+                    <option value="B1">B1</option>
+                    <option value="B2">B2</option>
+                    <option value="B3">B3</option>
+                    <option value="C1">C1</option>
+                    <option value="C2">C2</option>
+                    <option value="C3">C3</option>
+                    <option value="D1">D1</option>
+                    <option value="D2">D2</option>
+                    <option value="D3">D3</option>
+                    <option value="E1">E1</option>
+                    <option value="E2">E2</option>
+                    <option value="E3">E3</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="destination">Destination (Stage):</label>
+                <select id="destination" name="destination" onchange="updateSEMStageDestinationAndHighlight(this.value)">
+                    <option value="PH_STUB_A">a</option>
+                    <option value="PH_STUB_B">b</option>
+                    <option value="PH_STUB_C">c</option>
+                    <option value="PH_STUB_8">8</option>
+                    <option value="PH_STUB_10">10</option>
+                    <option value="PH_STUB_D">d</option>
+                    <option value="PH_STUB_F">f</option>
+                    <option value="PH_STUB_15">15</option>
+                    <option value="PH_STUB_17">17</option>
+                    <option value="PH_STUB_G">g</option>
+                    <option value="PH_STUB_I">i</option>
+                    <option value="PH_STUB_K">k</option>
+                    <option value="PH_STUB_20">20</option>
+                    <option value="PH_STUB_22">22</option>
+                    <option value="PH_STUB_L">l</option>
+                    <option value="PH_STUB_N">n</option>
+                    <option value="PH_STUB_27">27</option>
+                    <option value="PH_STUB_29">29</option>
+                    <option value="PH_STUB_O">o</option>
+                    <option value="PH_STUB_P">p</option>
+                    <option value="PH_STUB_Q">q</option>
+                </select>
+            </div>
+
+            <div class="button-group">
+                <button type="submit" class="btn btn-secondary">Transfer Sample</button>
+            </div>
+        </form>
+    </div>
+    
+    <div class="form-card" style="margin-left: 20px; text-align: center;"">
+        <h2 class="main-subtitle">Origin: SEM Tray</h2>
+        <svg id="semTrayContainer" width="300" height="380" viewBox="0 0 250 470" xmlns="http://www.w3.org/2000/svg">
+            <rect width="290" height="370" x="5" y="5" fill="none" stroke="black" stroke-width="2" rx="15" ry="15" />
+            <rect width="20" height="20" x="140" y="5" fill="black" />
+
+            <style>
+                text {
+                    font-family: Arial, sans-serif;
+                    font-size: 12px;
+                    text-anchor: middle;
+                    dominant-baseline: middle;
+                }
+            </style>
+
+            <circle id="E1" cx="50" cy="70" r="25" fill="white" stroke="black" />
+            <text x="50" y="70">E1</text>
+            <circle id="E2" cx="150" cy="70" r="25" fill="white" stroke="black" />
+            <text x="150" y="70">E2</text>
+            <circle id="E3" cx="250" cy="70" r="25" fill="white" stroke="black" />
+            <text x="250" y="70">E3</text>
+
+            <circle id="D1" cx="50" cy="135" r="25" fill="white" stroke="black" />
+            <text x="50" y="135">D1</text>
+            <circle id="D2" cx="150" cy="135" r="25" fill="white" stroke="black" />
+            <text x="150" y="135">D2</text>
+            <circle id="D3" cx="250" cy="135" r="25" fill="white" stroke="black" />
+            <text x="250" y="135">D3</text>
+
+            <circle id="C1" cx="50" cy="200" r="25" fill="white" stroke="black" />
+            <text x="50" y="200">C1</text>
+            <circle id="C2" cx="150" cy="200" r="25" fill="white" stroke="black" />
+            <text x="150" y="200">C2</text>
+            <circle id="C3" cx="250" cy="200" r="25" fill="white" stroke="black" />
+            <text x="250" y="200">C3</text>
+
+            <circle id="B1" cx="50" cy="265" r="25" fill="white" stroke="black" />
+            <text x="50" y="265">B1</text>
+            <circle id="B2" cx="150" cy="265" r="25" fill="white" stroke="black" />
+            <text x="150" y="265">B2</text>
+            <circle id="B3" cx="250" cy="265" r="25" fill="white" stroke="black" />
+            <text x="250" y="265">B3</text>
+
+            <circle id="A1" cx="50" cy="330" r="25" fill="lightgreen" stroke="black" />
+            <text x="50" y="330">A1</text>
+            <circle id="A2" cx="150" cy="330" r="25" fill="white" stroke="black" />
+            <text x="150" y="330">A2</text>
+            <circle id="A3" cx="250" cy="330" r="25" fill="white" stroke="black" />
+            <text x="250" y="330">A3</text>
+        </svg>
+        </svg>
+    <!-- </div> -->
+    
+    <!-- <div class="form-card" style="margin-top: 20px; margin-left: 20px;"> -->
+        <h2 class="main-subtitle">Destination: Stage</h2>
+        <svg id="stageContainer" width="440" height="470" viewBox="0 0 440 470">
+
+            <style>
+                text {
+                    font-family: Arial, sans-serif;
+                    font-size: 12px;
+                    text-anchor: middle;
+                    dominant-baseline: middle;
+                }
+                circle {
+                    stroke: black;
+                    stroke-width: 1;
+                }
+                circle.forbidden-position {
+                    fill: red;
+                }
+                circle.selectable-position {
+                    fill: white;
+                }
+                circle.selected {
+                    fill: lightblue
+                }
+            </style>
+
+            <svg width="440" height="600" viewBox="0 0 440 600">
+        
+            <!-- Top bar -->
+            <rect x="20" y="0" width="400" height="30" fill="#f0f0f0" stroke="#cccccc" stroke-width="1" />
+            
+            <!-- Side elements -->
+            <rect x="0" y="30" width="40" height="420" fill="#e0e0e0" rx="10" ry="10" />
+            <rect x="400" y="30" width="40" height="420" fill="#e0e0e0" rx="10" ry="10" />
+            
+            <!-- Handle -->
+            <rect x="20" y="370" width="400" height="100" fill="#999999" rx="10" ry="10" />
+            <rect x="80" y="350" width="280" height="110" fill="#ffffff" rx="10" ry="10" />
+            
+            <!-- Main stage background -->
+            <rect x="20" y="30" width="400" height="400" fill="#ffffff" stroke="#cccccc" stroke-width="1" />
+            
+            <!-- Number positions (1-36) -->
+            <!-- Row 1 -->
+            <circle id="stg_1" cx="60" cy="50" r="10" class="forbidden-position"/>
+            <text x="60" y="50">1</text>
+            
+            <circle id="stg_2" cx="124" cy="50" r="10" class="forbidden-position"/>
+            <text x="124" y="50">2</text>
+            
+            <circle id="stg_3" cx="188" cy="50" r="10" class="forbidden-position"/>
+            <text x="188" y="50">3</text>
+            
+            <circle id="stg_4" cx="252" cy="50" r="10" class="forbidden-position"/>
+            <text x="252" y="50">4</text>
+            
+            <circle id="stg_5" cx="316" cy="50" r="10" class="forbidden-position"/>
+            <text x="316" y="50">5</text>
+            
+            <circle id="stg_6" cx="380" cy="50" r="10" class="forbidden-position"/>
+            <text x="380" y="50">6</text>
+            
+            <!-- Row 2 -->
+            <circle id="stg_7" cx="60" cy="120" r="10" class="forbidden-position"/>
+            <text x="60" y="120">7</text>
+            
+            <circle id="stg_8" cx="124" cy="120" r="10" class="selectable-position"/>
+            <text x="124" y="120">8</text>
+            
+            <circle id="stg_9" cx="188" cy="120" r="10" class="forbidden-position"/>
+            <text x="188" y="120">9</text>
+            
+            <circle id="stg_10" cx="252" cy="120" r="10" class="selectable-position"/>
+            <text x="252" y="120">10</text>
+            
+            <circle id="stg_11" cx="316" cy="120" r="10" class="forbidden-position"/>
+            <text x="316" y="120">11</text>
+            
+            <circle id="stg_12" cx="380" cy="120" r="10" class="forbidden-position"/>
+            <text x="380" y="120">12</text>
+            
+            <!-- Row 3 -->
+            <circle id="stg_13" cx="60" cy="190" r="10" class="forbidden-position"/>
+            <text x="60" y="190">13</text>
+            
+            <circle id="stg_14" cx="124" cy="190" r="10" class="forbidden-position"/>
+            <text x="124" y="190">14</text>
+            
+            <circle id="stg_15" cx="188" cy="190" r="10" class="selectable-position"/>
+            <text x="188" y="190">15</text>
+            
+            <circle id="stg_16" cx="252" cy="190" r="10" class="forbidden-position"/>
+            <text x="252" y="190">16</text>
+            
+            <circle id="stg_17" cx="316" cy="190" r="10" class="selectable-position"/>
+            <text x="316" y="190">17</text>
+            
+            <circle id="stg_18" cx="380" cy="190" r="10" class="forbidden-position"/>
+            <text x="380" y="190">18</text>
+            
+            <!-- Row 4 -->
+            <circle id="stg_19" cx="60" cy="260" r="10" class="forbidden-position"/>
+            <text x="60" y="260">19</text>
+            
+            <circle id="stg_20" cx="124" cy="260" r="10" class="selectable-position"/>
+            <text x="124" y="260">20</text>
+            
+            <circle id="stg_21" cx="188" cy="260" r="10" class="forbidden-position"/>
+            <text x="188" y="260">21</text>
+            
+            <circle id="stg_22" cx="252" cy="260" r="10" class="selectable-position"/>
+            <text x="252" y="260">22</text>
+            
+            <circle id="stg_23" cx="316" cy="260" r="10" class="forbidden-position"/>
+            <text x="316" y="260">23</text>
+            
+            <circle id="stg_24" cx="380" cy="260" r="10" class="forbidden-position"/>
+            <text x="380" y="260">24</text>
+            
+            <!-- Row 5 -->
+            <circle id="stg_25" cx="60" cy="330" r="10" class="forbidden-position"/>
+            <text x="60" y="330">25</text>
+            
+            <circle id="stg_26" cx="124" cy="330" r="10" class="forbidden-position"/>
+            <text x="124" y="330">26</text>
+            
+            <circle id="stg_27" cx="188" cy="330" r="10" class="selectable-position"/>
+            <text x="188" y="330">27</text>
+            
+            <circle id="stg_28" cx="252" cy="330" r="10" class="forbidden-position"/>
+            <text x="252" y="330">28</text>
+            
+            <circle id="stg_29" cx="316" cy="330" r="10" class="selectable-position"/>
+            <text x="316" y="330">29</text>
+            
+            <circle id="stg_30" cx="380" cy="330" r="10" class="forbidden-position"/>
+            <text x="380" y="330">30</text>
+            
+            <!-- Row 6 -->
+            <circle id="stg_31" cx="60" cy="400" r="10" class="forbidden-position"/>
+            <text x="60" y="400">31</text>
+            
+            <circle id="stg_32" cx="124" cy="400" r="10" class="forbidden-position"/>
+            <text x="124" y="400">32</text>
+            
+            <circle id="stg_33" cx="188" cy="400" r="10" class="forbidden-position"/>
+            <text x="188" y="400">33</text>
+            
+            <circle id="stg_34" cx="252" cy="400" r="10" class="forbidden-position"/>
+            <text x="252" y="400">34</text>
+            
+            <circle id="stg_35" cx="316" cy="400" r="10" class="forbidden-position"/>
+            <text x="316" y="400">35</text>
+            
+            <circle id="stg_36" cx="380" cy="400" r="10" class="forbidden-position"/>
+            <text x="380" y="400">36</text>
+            
+            <!-- Letter positions (a-q) -->
+            <!-- Row 1 -->
+            <circle id="stg_a" cx="92" cy="85" r="10" class="selectable-position selected"/>
+            <text x="92" y="85">a</text>
+            
+            <circle id="stg_b" cx="220" cy="85" r="10" class="selectable-position"/>
+            <text x="220" y="85">b</text>
+            
+            <circle id="stg_c" cx="348" cy="85" r="10" class="selectable-position"/>
+            <text x="348" y="85">c</text>
+            
+            <!-- Row 2 -->
+            <circle id="stg_d" cx="156" cy="160" r="10" class="selectable-position"/>
+            <text x="156" y="160">d</text>
+            
+            <circle id="stg_e" cx="220" cy="160" r="10" class="forbidden-position"/>
+            <text x="220" y="160">e</text>
+            
+            <circle id="stg_f" cx="284" cy="160" r="10" class="selectable-position"/>
+            <text x="284" y="160">f</text>
+            
+            <!-- Row 3 -->
+            <circle id="stg_g" cx="92" cy="225" r="10" class="selectable-position"/>
+            <text x="92" y="225">g</text>
+            
+            <circle id="stg_h" cx="156" cy="225" r="10" class="forbidden-position"/>
+            <text x="156" y="225">h</text>
+            
+            <circle id="stg_i" cx="220" cy="225" r="10" class="selectable-position"/>
+            <text x="220" y="225">i</text>
+            
+            <circle id="stg_j" cx="284" cy="225" r="10" class="forbidden-position"/>
+            <text x="284" y="225">j</text>
+            
+            <circle id="stg_k" cx="348" cy="225" r="10" class="selectable-position"/>
+            <text x="348" y="225">k</text>
+            
+            <!-- Row 4 -->
+            <circle id="stg_l" cx="156" cy="295" r="10" class="selectable-position"/>
+            <text x="156" y="295">l</text>
+            
+            <circle id="stg_m" cx="220" cy="295" r="10" class="forbidden-position"/>
+            <text x="220" y="295">m</text>
+            
+            <circle id="stg_n" cx="284" cy="295" r="10" class="selectable-position"/>
+            <text x="284" y="295">n</text>
+            
+            <!-- Row 5 -->
+            <circle id="stg_o" cx="92" cy="365" r="10" class="selectable-position"/>
+            <text x="92" y="365">o</text>
+            
+            <circle id="stg_p" cx="220" cy="365" r="10" class="selectable-position"/>
+            <text x="220" y="365">p</text>
+            
+            <circle id="stg_q" cx="348" cy="365" r="10" class="selectable-position"/>
+            <text x="348" y="365">q</text>
+        </svg>
+        </br>
+        <small class="form-text text-muted">Note: Positions in red are unavaiable</small>
     </div>
 </div>

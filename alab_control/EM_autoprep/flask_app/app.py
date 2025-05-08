@@ -92,7 +92,7 @@ class SamplePrepEnder3(Ender3):
     )
     clean_stub_pos = read_CSV_into_positions(
         path=os.path.join(rootpath, stubs_tray_filename)
-    )
+    ) 
 
     def disconnect(self):
         if hasattr(self, 'serial') and self.serial is not None:
@@ -554,8 +554,8 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
             voltage = f"{int(voltage):05d}"
             etime = f"{int(etime):05d}"
 
-            print(f"SEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}")
-            socketio.emit('function_response', {'result': f"SEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}"})
+            print(f"SEM process requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}")
+            socketio.emit('function_response', {'result': f"SEM process requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}"})
 
             try:
                 robot.gohome()
@@ -628,20 +628,63 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
                 time.sleep(int(etime)/1000+2)
                 robot.moveto(*robot.intermediate_pos["ZHOME"])
                 
-                print(f"Delivering stub to {origin}.")
-                socketio.emit('function_response', {'result': f"Delivering stub to {origin}."})
-                robot.moveto(*robot.clean_stub_pos[origin])
-                robot.moveto(*robot.clean_stub_pos["STRAY_Z1"])
-                robot.speed = SPEED_LOW
-                robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
-                robot.speed = SPEED_VLOW
-                robot.moveto(*robot.clean_stub_pos["STRAY_Z3"])
-                control_panel_vacuum("SEM",False)
-                time.sleep(PAUSE_VAC)
-                robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
-                robot.speed = SPEED_NORMAL
-                robot.moveto(*robot.intermediate_pos["ZHOME"])
-                robot.moveto(*robot.intermediate_pos["HOME"])
+                if destination == "tray":
+                    print(f"Delivering stub to tray: {origin}.")
+                    socketio.emit('function_response', {'result': f"Delivering stub to tray: {origin}."})
+                    robot.moveto(*robot.clean_stub_pos[origin])
+                    robot.moveto(*robot.clean_stub_pos["STRAY_Z1"])
+                    robot.speed = SPEED_LOW
+                    robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+                    robot.speed = SPEED_VLOW
+                    robot.moveto(*robot.clean_stub_pos["STRAY_Z3"])
+                    control_panel_vacuum("SEM",False)
+                    time.sleep(PAUSE_VAC)
+                    robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+                    robot.speed = SPEED_NORMAL
+                    robot.moveto(*robot.intermediate_pos["ZHOME"])
+                    robot.moveto(*robot.intermediate_pos["HOME"])
+                else:
+                    print(f"Delivering stub to stage: {destination}.")
+                    socketio.emit('function_response', {'result': f"Delivering stub to stage: {destination}."})
+                    #send_command("SEMPREPR020") - homing rotator
+                    #send_command("SEMSTORG000") - homing gripper
+
+                    robot.moveto(*robot.equipment_pos["ROTATOR_0"])
+                    #send_command("SEMPREPR155") - homing stub
+                    robot.moveto(*robot.equipment_pos["ROTATOR_Z1"])
+                    robot.speed = SPEED_VLOW
+                    robot.moveto(*robot.equipment_pos["ROTATOR_ENGAGE"])
+                    control_panel_vacuum("SEM",False)
+                    time.sleep(PAUSE_VAC)
+                    robot.speed = SPEED_NORMAL
+                    robot.moveto(*robot.intermediate_pos["ZHOME"])
+                    #send_command("SEMPREPR105") - rotating stub
+                    robot.moveto(*robot.equipment_pos["GRIPPER_ROTATOR_0"])
+                    robot.moveto(*robot.equipment_pos["GRIPPER_ROTATOR_Z1"])
+                    #send_command("SEMSTORG105") - closing gripper - probably a good idea to try to close pulse by pulse instead of a big and quick close action
+                    robot.speed = SPEED_VLOW
+                    robot.moveto(*robot.equipment_pos["GRIPPER_ROTATOR_DISENGAGE"])
+                    robot.speed = SPEED_NORMAL
+                    robot.moveto(*robot.intermediate_pos["ZHOME"])
+                    #send_command("PHLIDMVL040") - opening stage lid
+                    #delay is necessary before moving the head. in initial code it was 7s
+                    robot.moveto(*robot.phenom_handler_pos[destination])
+                    robot.moveto(*robot.phenom_handler_pos["PH_Z1"])
+                    robot.speed = SPEED_LOW
+                    robot.moveto(*robot.phenom_handler_pos["PH_Z2"])
+                    robot.speed = SPEED_VLOW
+                    robot.moveto(*robot.phenom_handler_pos["PH_Z3"])
+                    #send_command("SEMSTORG085") - partial opening to release stub
+                    robot.moveto(*robot.phenom_handler_pos["PH_Z4"])
+                    #send_command("SEMSTORG085") - partial closing to prepare to press stub down
+                    robot.moveto(*robot.phenom_handler_pos["PH_Z5"])
+                    #send_command("SEMSTORG000") - homing gripper
+                    robot.moveto(*robot.intermediate_pos["ZHOME"])
+                    #send_command("PHLIDMVL150") - closing stage lid
+                    robot.moveto(*robot.intermediate_pos["HOME"])
+                    robot.speed = SPEED_NORMAL
+                    robot.moveto(*robot.intermediate_pos["ZHOME"])
+                    robot.moveto(*robot.intermediate_pos["HOME"])
 
             device_step_final(robot)
             return True
@@ -799,7 +842,7 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination):
 # Map function names to handlers
 function_map = {
     'button': button_action,
-    'sem_process': sem_process_action,
+    'sem_process_process': sem_process_action,
     'tem_process': tem_process_action,
     'c3dp_test_connectivity': c3dp_test_connectivity,
     'c3dp_test_connectivity_machine_test_page': c3dp_test_connectivity_machine_test_page,
@@ -841,7 +884,7 @@ def sem_tray_page():
 
 @app.route('/sem_stage')
 def sem_stage_page():
-    return render_template('sem_stage.html')
+    return render_template('sem_stage.html', page_init_script="initSEMTray();")
 
 @app.route('/tem_tray')
 def tem_page():
