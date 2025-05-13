@@ -469,9 +469,9 @@ def control_panel_shutdown():
 
 def control_panel_rotator(flip_state):
     if flip_state == "faceDown":
-        return send_plc_command(rotator_faceDown)
+        return send_plc_command(f"SEMPREPR{rotator_faceDown}")
     elif flip_state == "faceUp":
-        return send_plc_command(rotator_faceUp)
+        return send_plc_command(f"SEMPREPR{rotator_faceUp}")
     else:
         raise ValueError(f"Invalid flip state: {flip_state}. Expected 'faceUp' or 'faceDown'.")
 
@@ -994,7 +994,7 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination):
 # Map function names to handlers
 function_map = {
     'button': button_action,
-    'sem_process_process': sem_process_action,
+    'sem_process_action': sem_process_action,
     'tem_process': tem_process_action,
     'c3dp_test_connectivity': c3dp_test_connectivity,
     'c3dp_test_connectivity_machine_test_page': c3dp_test_connectivity_machine_test_page,
@@ -1005,6 +1005,7 @@ function_map = {
     'control_panel_sem_stage_close': control_panel_sem_stage_close,
     'control_panel_tem_grid_holder_open': control_panel_tem_grid_holder_open,
     'control_panel_tem_grid_holder_close': control_panel_tem_grid_holder_close,
+    'control_panel_rotator': control_panel_rotator,
     'device_extend_bed': device_extend_bed,
     'device_retract_bed': device_retract_bed,
     'robot_manual_move': move_robot_manual,
