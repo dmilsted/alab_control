@@ -16,16 +16,22 @@ socketio = SocketIO(app, async_mode='threading')  # Important: Specify async_mod
 host_ip = "0.0.0.0"  # Set to listen on all interfaces
 web_port = 8000
 udp_port = 8001
-server_ip = "142.251.214.142" #change to server's IP. This is google :)
+server_ip = "192.168.1.1" #change to server's IP. This is google :)
 plc_ip = '192.168.1.172'
 plc_port = 8888
 c3dp_com_port = "COM7"
 
 # Define numeric values for linear actuators
-sem_stage_opened = "015"
-sem_stage_closed = "180"
+sem_stage_opened = "040"
+sem_stage_closed = "150"
 tem_grid_holder_opened = "000"
 tem_grid_holder_closed = "150"
+rotator_faceDown = "020"
+rotator_faceUp = "155"
+gripper_home = "000" #gripper fully open
+gripper_close = "106" #gripper closed enough to firmly hold a stub
+gripper_stub_release = "084" #gripper opened just enough to release a stub
+gripper_stub_press = "094" #gripper closed enough to press a stub down without contamining the carbon tape
 
 
 # Define 3D printer constants for safe operation - be careful when changing or the machine might break
@@ -54,7 +60,7 @@ used_disks_filename = 'disks_tray_used.csv'
 equipment_filename = 'equipment.csv'
 intermediate_positions_filename = 'intermediate_positions.csv'
 phenom_holder_positions_filename = 'phenom_stubs.csv'
-phenom_handler_filename = 'phenom_handler.csv'
+#phenom_handler_filename = 'phenom_handler.csv' # TODO - delete this?
 stubs_tray_filename = 'stubs_tray.csv'
 
 def float_or_none(s):
@@ -62,12 +68,65 @@ def float_or_none(s):
     return None
   return float(s)
 
+'''
 def read_CSV_into_positions(path): 
   with open(path, mode ='r') as file:
     csvFile = csv.reader(file)
     for lines in csvFile:
       #Each line has a list of 4 arguments, argument 0 is the name of the position, and argument 1, 2, 3 correspond to x, y, z, respectively
       positions[lines[0]] = ((float_or_none(lines[1]), float_or_none(lines[2]), float_or_none(lines[3])))
+  return positions
+'''
+
+def read_CSV_into_positions(path): 
+  positions = {}
+  with open(path, mode ='r') as file:
+    csvFile = csv.reader(file)
+    in_metadata = True
+    has_data = False
+    
+    for lines in csvFile:
+      if not lines:  # Skip empty lines
+        continue
+        
+      # Skip comment lines
+      if lines[0].strip().startswith('#'):
+        continue
+        
+      # Check for end of metadata marker
+      if lines[0].strip() == "---":
+        in_metadata = False
+        continue
+        
+      # Skip metadata section
+      if in_metadata:
+        # If line looks like data (has enough columns and first isn't a comment), 
+        # assume no metadata section and process it
+        if len(lines) >= 4 and not lines[0].strip().startswith('#'):
+          in_metadata = False  # Auto-exit metadata mode
+          # Don't continue - fall through to process this line
+        else:
+          continue
+        
+      # Process normal data
+      if len(lines) >= 4:  # Make sure we have enough columns
+        has_data = True
+        
+        # If there are 5 columns, include the lid position in the tuple
+        if len(lines) >= 5:
+            positions[lines[0]] = (float_or_none(lines[1]), 
+                                  float_or_none(lines[2]), 
+                                  float_or_none(lines[3]),
+                                  float_or_none(lines[4]))
+        else:
+            # Just the x, y, z coordinates
+            positions[lines[0]] = (float_or_none(lines[1]), 
+                                  float_or_none(lines[2]), 
+                                  float_or_none(lines[3]))
+  
+  if not has_data:
+    print("Warning: No position data was found in the file.")
+    
   return positions
 
 class SamplePrepEnder3(Ender3):
@@ -84,11 +143,8 @@ class SamplePrepEnder3(Ender3):
     intermediate_pos = read_CSV_into_positions(
         path=os.path.join(rootpath, intermediate_positions_filename)
     )
-    used_stub_pos = read_CSV_into_positions(
+    phenom_stub_pos = read_CSV_into_positions(
         path=os.path.join(rootpath, phenom_holder_positions_filename)
-    )
-    phenom_handler_pos = read_CSV_into_positions(
-        path=os.path.join(rootpath, phenom_handler_filename)
     )
     clean_stub_pos = read_CSV_into_positions(
         path=os.path.join(rootpath, stubs_tray_filename)
@@ -359,22 +415,65 @@ def control_panel_shutdown():
     return send_plc_command("SHUTDWN")
 
 def control_panel_sem_stage_open():
-    def _stage_open_operation():
-        return send_plc_command(f"SEMSTORG{sem_stage_opened}")
+    return send_plc_command(f"PHILIDMVL{sem_stage_opened}")
+
+def control_panel_sem_stage_partial_open(phenom_stub_lid_value, delay_seconds=7):
+    """
+    Sends a command to the PLC to partially open the SEM stage and waits for the
+    specified delay time to allow the linear actuator to complete its movement.
     
-    return handle_control_panel_operation(_stage_open_operation)
+    Args:
+        phenom_stub_lid_value: The value for the stub lid position,
+                              will be formatted as a 3-digit string.
+        delay_seconds (int): The number of seconds to wait after sending the command.
+                            Defaults to 7 seconds.
+    
+    Returns:
+        The response from the send_plc_command function.
+    """
+    # Format the value as a 3-digit string (e.g., 82 becomes "082")
+    formatted_value = f"{int(phenom_stub_lid_value):03d}"
+    
+    # Send the command to the PLC
+    response = send_plc_command(f"PHILIDMVL{formatted_value}")
+    
+    # Wait for the specified delay to allow the actuator to complete its movement
+    print(f"Waiting {delay_seconds} seconds for linear actuator movement...")
+    time.sleep(delay_seconds)
+    
+    return response
 
 def control_panel_sem_stage_close():
-    def _stage_close_operation():
-        return send_plc_command(f"SEMSTORG{sem_stage_closed}")
-    
-    return handle_control_panel_operation(_stage_close_operation)
+    return send_plc_command(f"PHILIDMVL{sem_stage_closed}")
+
+def control_panel_gripper_home():
+    return send_plc_command(f"SEMSTORG{gripper_home}")
+
+def control_panel_gripper_close():
+    return send_plc_command(f"SEMSTORG{gripper_close}")
+
+def control_panel_gripper_release():
+    return send_plc_command(f"SEMSTORG{gripper_stub_release}")
+
+def control_panel_gripper_press():
+    return send_plc_command(f"SEMSTORG{gripper_stub_press}")
 
 def control_panel_tem_grid_holder_open():
     return send_plc_command(f"TEMPREPL{tem_grid_holder_opened}")
 
 def control_panel_tem_grid_holder_close():
     return send_plc_command(f"TEMPREPL{tem_grid_holder_closed}")
+
+def control_panel_shutdown():
+    return send_plc_command("SHUTDWN")
+
+def control_panel_rotator(flip_state):
+    if flip_state == "faceDown":
+        return send_plc_command(rotator_faceDown)
+    elif flip_state == "faceUp":
+        return send_plc_command(rotator_faceUp)
+    else:
+        raise ValueError(f"Invalid flip state: {flip_state}. Expected 'faceUp' or 'faceDown'.")
 
 def control_panel_laser_status():
     return send_plc_command("SEMPREPTEST")
@@ -415,13 +514,13 @@ def device_step_final(robot=None):
             # Set machine to standby
             control_panel_standby()
             
-            # Extending the bed always homes Z
-            if device_extend_bed():
+            # Retracting the bed after exposure
+            if device_retract_bed():
                 print("Sample preparation completed successfully.")
                 socketio.emit('function_response', {'result': "Sample preparation completed successfully."})
                 return True
             else:
-                raise Exception("Bed extension failed")
+                raise Exception("Bed retraction failed")
                 
         except Exception as e:
             error_message = f"Error in final steps: {str(e)}"
@@ -475,6 +574,48 @@ def device_extend_bed():
             
     return handle_robot_operation(
         _extend_operation,
+        robot=global_robot
+    )
+
+def device_retract_bed():
+    def _retract_operation(robot):
+        try:
+            print("3DP bed retraction requested.")
+            socketio.emit('function_response', {'result': "3DP bed retraction requested."})
+            
+            # Get current position
+            robot.get_current_position()
+            current_pos = robot.position
+            print(f"Current position: {current_pos}")
+            
+            # Check if Z position is safe
+            if current_pos[2] > 15:
+                print("Z position unsafe. Moving to safe position first...")
+                robot.speed = SPEED_NORMAL
+                robot.moveto(*robot.intermediate_pos["PRE_EXTEND_POS"])
+            else:
+                # Z is safe, just ensure X is at safe position
+                print("Z position safe. Moving X to safe position...")
+                robot.speed = SPEED_NORMAL
+                robot.moveto(15, current_pos[1], current_pos[2])
+            
+            # Now retract the bed
+            print("Moving to BED_RETRACTED position...")
+            robot.speed = SPEED_NORMAL
+            robot.moveto(*robot.intermediate_pos["BED_RETRACTED"])
+            
+            print("3DP bed retracted successfully")
+            socketio.emit('function_response', {'result': "3DP bed retracted."})
+            return True
+                
+        except Exception as e:
+            error_message = f"3DP bed couldn't be retracted: {e}"
+            print(error_message)
+            socketio.emit('function_response', {'result': error_message})
+            return False
+            
+    return handle_robot_operation(
+        _retract_operation,
         robot=global_robot
     )
 
@@ -646,11 +787,13 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
                 else:
                     print(f"Delivering stub to stage: {destination}.")
                     socketio.emit('function_response', {'result': f"Delivering stub to stage: {destination}."})
-                    #send_command("SEMPREPR020") - homing rotator
-                    #send_command("SEMSTORG000") - homing gripper
+                    #homing rotator
+                    control_panel_rotator("faceDown")
+                    #homing gripper
+                    control_panel_gripper_home()
 
                     robot.moveto(*robot.equipment_pos["ROTATOR_0"])
-                    #send_command("SEMPREPR155") - homing stub
+                    #send_command("SEMPREPR155") - homing stub 155
                     robot.moveto(*robot.equipment_pos["ROTATOR_Z1"])
                     robot.speed = SPEED_VLOW
                     robot.moveto(*robot.equipment_pos["ROTATOR_ENGAGE"])
@@ -658,29 +801,36 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
                     time.sleep(PAUSE_VAC)
                     robot.speed = SPEED_NORMAL
                     robot.moveto(*robot.intermediate_pos["ZHOME"])
-                    #send_command("SEMPREPR105") - rotating stub
+                    #rotating stub
+                    control_panel_rotator("faceUp")
                     robot.moveto(*robot.equipment_pos["GRIPPER_ROTATOR_0"])
                     robot.moveto(*robot.equipment_pos["GRIPPER_ROTATOR_Z1"])
-                    #send_command("SEMSTORG105") - closing gripper - probably a good idea to try to close pulse by pulse instead of a big and quick close action
+                    #closing gripper on the stub
+                    control_panel_gripper_close()
                     robot.speed = SPEED_VLOW
                     robot.moveto(*robot.equipment_pos["GRIPPER_ROTATOR_DISENGAGE"])
                     robot.speed = SPEED_NORMAL
                     robot.moveto(*robot.intermediate_pos["ZHOME"])
-                    #send_command("PHLIDMVL040") - opening stage lid
-                    #delay is necessary before moving the head. in initial code it was 7s
-                    robot.moveto(*robot.phenom_handler_pos[destination])
-                    robot.moveto(*robot.phenom_handler_pos["PH_Z1"])
+                    #homing rotator
+                    control_panel_rotator("faceDown")
+                    #opening stage lid
+                    control_panel_sem_stage_partial_open(int(robot.phenom_stub_pos[destination][4]))
+                    robot.moveto(*robot.phenom_stub_pos[destination])
+                    robot.moveto(*robot.phenom_stub_pos["PH_Z1"])
                     robot.speed = SPEED_LOW
-                    robot.moveto(*robot.phenom_handler_pos["PH_Z2"])
+                    robot.moveto(*robot.phenom_stub_pos["PH_Z2"])
                     robot.speed = SPEED_VLOW
-                    robot.moveto(*robot.phenom_handler_pos["PH_Z3"])
-                    #send_command("SEMSTORG085") - partial opening to release stub
-                    robot.moveto(*robot.phenom_handler_pos["PH_Z4"])
-                    #send_command("SEMSTORG085") - partial closing to prepare to press stub down
-                    robot.moveto(*robot.phenom_handler_pos["PH_Z5"])
-                    #send_command("SEMSTORG000") - homing gripper
+                    robot.moveto(*robot.phenom_stub_pos["PH_Z3"])
+                    #opening gripper, partially, enough to release stub
+                    control_panel_gripper_release()
+                    robot.moveto(*robot.phenom_stub_pos["PH_Z4"])
+                    #closing gripper, partially, to press stub down
+                    control_panel_gripper_press()
+                    robot.moveto(*robot.phenom_stub_pos["PH_Z5"])
+                    #opening gripper
+                    control_panel_gripper_home()
                     robot.moveto(*robot.intermediate_pos["ZHOME"])
-                    #send_command("PHLIDMVL150") - closing stage lid
+                    control_panel_sem_stage_close()
                     robot.moveto(*robot.intermediate_pos["HOME"])
                     robot.speed = SPEED_NORMAL
                     robot.moveto(*robot.intermediate_pos["ZHOME"])
@@ -799,7 +949,9 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination):
                 socketio.emit('function_response', {'result': f"Delivering grid to {destination}."})
                 control_panel_tem_grid_holder_open()
                 time.sleep(1)
-                robot.moveto(*robot.used_disk_pos[destination])
+                #Moving X and Y separatelyto ensure the grid never passes over another grid to avoid cross-contamination:
+                robot.moveto(x=robot.used_disk_pos[destination][0]) 
+                robot.moveto(y=robot.used_disk_pos[destination][1])
                 robot.moveto(*robot.used_disk_pos["TETRAY_Z1"])
                 robot.speed = SPEED_LOW
                 robot.moveto(*robot.used_disk_pos["TETRAY_Z2"])
@@ -854,6 +1006,7 @@ function_map = {
     'control_panel_tem_grid_holder_open': control_panel_tem_grid_holder_open,
     'control_panel_tem_grid_holder_close': control_panel_tem_grid_holder_close,
     'device_extend_bed': device_extend_bed,
+    'device_retract_bed': device_retract_bed,
     'robot_manual_move': move_robot_manual,
     'robot_manual_home': home_robot_manual,
     'send_manual_plc_command': send_manual_plc_command

@@ -1,3 +1,13 @@
+This file contains robot (x, y, z) position data for stub positions on the SEM stub tray.
+
+Format: position name | x | y | z
+
+Position names like <NAME># move only the printer bed and the robot head (Z is None).  
+Position names like <NAME>_Z# move the robot head vertically and only have a Z value (X and Y are None).
+
+Created by: David Milsted
+Last updated: 2025-05-12
+---
 A1,51.3,126.8,None
 A2,51.3,126.8,None
 A3,51.3,126.8,None

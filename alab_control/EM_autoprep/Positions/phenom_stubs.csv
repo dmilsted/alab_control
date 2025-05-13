@@ -1,24 +1,35 @@
-PH_STUB_A,23.8,173.8,None
-PH_STUB_B,23.8,173.8,None
-PH_STUB_C,23.8,173.8,None
-PH_STUB_8,23.8,173.8,None
-PH_STUB_10,23.8,173.8,None
-PH_STUB_D,23.8,173.8,None
-PH_STUB_F,23.8,173.8,None
-PH_STUB_15,23.8,173.8,None
-PH_STUB_17,23.8,173.8,None
-PH_STUB_G,23.8,173.8,None
-PH_STUB_I,23.8,173.8,None
-PH_STUB_K,23.8,173.8,None
-PH_STUB_20,23.8,173.8,None
-PH_STUB_22,23.8,173.8,None
-PH_STUB_L,23.8,173.8,None
-PH_STUB_N,23.8,173.8,None
-PH_STUB_27,23.8,173.8,None
-PH_STUB_29,23.8,173.8,None
-PH_STUB_O,23.8,173.8,None
-PH_STUB_P,23.8,173.8,None
-PH_STUB_Q,23.8,173.8,None
+This file contains robot (x, y, z) position data and lid actuator values specific to the Phenom XL Stage.
+
+Format: position name | x | y | z | lid position
+
+Positions named like PH_STUB_# define X and Y coordinates for stub placement, along with a lid position value (Z is None).
+Positions named like PH_Z# move the robot head vertically and only have a Z value (x and y are None).
+
+Created by: David Milsted
+Last updated: 2025-05-12
+---
+#position name, x, y, z, lid position (040 = open, 150 = closed). A difference of 8 was calculaded and not tested yet
+PH_STUB_A,23.8,173.8,None,056
+PH_STUB_B,23.8,173.8,None,056
+PH_STUB_C,23.8,173.8,None,056
+PH_STUB_8,23.8,173.8,None,064
+PH_STUB_10,23.8,173.8,None,064
+PH_STUB_D,23.8,173.8,None,072
+PH_STUB_F,23.8,173.8,None,072
+PH_STUB_15,23.8,173.8,None,080
+PH_STUB_17,23.8,173.8,None,080
+PH_STUB_G,23.8,173.8,None,088
+PH_STUB_I,23.8,173.8,None,088
+PH_STUB_K,23.8,173.8,None,088
+PH_STUB_20,23.8,173.8,None,096
+PH_STUB_22,23.8,173.8,None,096
+PH_STUB_L,23.8,173.8,None,104
+PH_STUB_N,23.8,173.8,None,104
+PH_STUB_27,23.8,173.8,None,112
+PH_STUB_29,23.8,173.8,None,112
+PH_STUB_O,23.8,173.8,None,120
+PH_STUB_P,23.8,173.8,None,120
+PH_STUB_Q,23.8,173.8,None,120
 PH_Z1,None,None,133
 PH_Z2,None,None,141.5
 PH_Z3,None,None,137
