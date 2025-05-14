@@ -534,120 +534,34 @@ def device_step_final(robot=None):
     else:
         # Otherwise use the global robot management system
         return handle_robot_operation(_final_operation)
-
+    
 
 def device_extend_bed():
-    def _extend_operation(robot):
-        try:
-            print("3DP bed extension requested.")
-            socketio.emit('function_response', {'result': "3DP bed extension requested."})
-            
-            # Try to get current position with retries
-            position_acquired = False
-            retry_count = 0
-            max_retries = 3
-            
-            while not position_acquired and retry_count < max_retries:
-                try:
-                    print(f"Attempt {retry_count + 1} to get current position...")
-                    socketio.emit('function_response', {'result': f"Attempt {retry_count + 1} to get current position..."})
-                    robot.get_current_position()
-                    current_pos = robot.position
-                    print(f"Current position: {current_pos}")
-                    position_acquired = True
-                except Exception as pos_error:
-                    retry_count += 1
-                    error_msg = f"Error getting position (attempt {retry_count}): {pos_error}"
-                    print(error_msg)
-                    socketio.emit('function_response', {'result': error_msg})
-                    if retry_count < max_retries:
-                        # Try to re-home the robot
-                        try:
-                            print("Trying to home the robot again...")
-                            socketio.emit('function_response', {'result': "Trying to home the robot again..."})
-                            robot.gohome()
-                            time.sleep(2)  # Give it time to complete
-                        except Exception as home_error:
-                            print(f"Homing error: {home_error}")
-                    else:
-                        print("Maximum retries reached. Operation aborted for safety.")
-                        socketio.emit('function_response', {'result': "Maximum retries reached. Operation aborted for safety reasons."})
-                        return False
-            
-            # Only proceed if we got a valid position
-            if position_acquired:
-                # Check if Z position is safe
-                if current_pos[2] > 15:
-                    print("Z position unsafe. Moving to safe position first...")
-                    robot.speed = SPEED_NORMAL
-                    
-                    try:
-                        # Check if we can access intermediate_pos safely
-                        if "PRE_EXTEND_POS" in robot.intermediate_pos:
-                            pre_extend_pos = robot.intermediate_pos["PRE_EXTEND_POS"]
-                            robot.moveto(*pre_extend_pos)
-                        else:
-                            print("PRE_EXTEND_POS not found in positions dictionary.")
-                            socketio.emit('function_response', {'result': "Error: Required position PRE_EXTEND_POS not found. Operation aborted for safety."})
-                            return False
-                    except Exception as move_error:
-                        print(f"Error accessing positions or moving: {move_error}")
-                        socketio.emit('function_response', {'result': f"Error during movement: {move_error}. Operation aborted for safety."})
-                        return False
-                else:
-                    # Z is safe, just ensure X is at safe position
-                    print("Z position safe. Moving X to safe position...")
-                    robot.speed = SPEED_NORMAL
-                    print(f"Moving to ({15}, {current_pos[1]}, {current_pos[2]})")
-                    try:
-                        robot.moveto(15, current_pos[1], current_pos[2])
-                    except Exception as move_error:
-                        print(f"Error moving to safe X position: {move_error}")
-                        socketio.emit('function_response', {'result': f"Error during movement: {move_error}. Operation aborted for safety."})
-                        return False
-                
-                # Now extend the bed
-                print("Moving to BED_EXTENDED position...")
-                try:
-                    # Check if we can access intermediate_pos safely
-                    if "BED_EXTENDED" in robot.intermediate_pos:
-                        bed_extended = robot.intermediate_pos["BED_EXTENDED"]
-                        robot.speed = SPEED_NORMAL
-                        robot.moveto(*bed_extended)
-                    else:
-                        print("BED_EXTENDED not found in positions dictionary.")
-                        socketio.emit('function_response', {'result': "Error: Required position BED_EXTENDED not found. Operation aborted for safety."})
-                        return False
-                except Exception as extend_error:
-                    print(f"Error extending bed: {extend_error}")
-                    socketio.emit('function_response', {'result': f"Error during bed extension: {extend_error}. Operation aborted."})
-                    return False
-                
-                print("3DP bed extended successfully")
-                socketio.emit('function_response', {'result': "3DP bed extended successfully."})
-                return True
-            else:
-                # We should never reach here, but just in case
-                print("Failed to get position after retries. Operation aborted for safety.")
-                socketio.emit('function_response', {'result': "Failed to get position. Operation aborted for safety reasons."})
-                return False
-                
-        except Exception as e:
-            error_message = f"3DP bed couldn't be extended: {e}"
-            print(error_message)
-            socketio.emit('function_response', {'result': error_message})
-            return False
-            
-    return handle_robot_operation(
-        _extend_operation,
-        robot=global_robot
-    )
+    return device_move_bed("extend")
 
 def device_retract_bed():
-    def _retract_operation(robot):
+    return device_move_bed("retract")
+
+def device_move_bed(action):
+    def _bed_operation(robot):
         try:
-            print("3DP bed retraction requested.")
-            socketio.emit('function_response', {'result': "3DP bed retraction requested."})
+            if action not in ["extend", "retract"]:
+                print(f"Invalid action: {action}. Must be 'extend' or 'retract'.")
+                socketio.emit('function_response', 
+                             {'result': f"Invalid action: {action}. Must be 'extend' or 'retract'."})
+                return False
+                
+            position_name = "BED_EXTENDED" if action == "extend" else "BED_RETRACTED"
+            operation_name = "extension" if action == "extend" else "retraction"
+            
+            print(f"3DP bed {operation_name} requested.")
+            socketio.emit('function_response', {'result': f"3DP bed {operation_name} requested."})
+            
+            # Check if robot is initialized
+            if robot is None:
+                print("Robot object is not initialized.")
+                socketio.emit('function_response', {'result': "Error: Robot is not initialized. Try homing first."})
+                return False
             
             # Try to get current position with retries
             position_acquired = False
@@ -678,7 +592,8 @@ def device_retract_bed():
                             print(f"Homing error: {home_error}")
                     else:
                         print("Maximum retries reached. Operation aborted for safety.")
-                        socketio.emit('function_response', {'result': "Maximum retries reached. Operation aborted for safety reasons."})
+                        socketio.emit('function_response', 
+                                    {'result': "Maximum retries reached. Operation aborted for safety reasons."})
                         return False
             
             # Only proceed if we got a valid position
@@ -689,17 +604,13 @@ def device_retract_bed():
                     robot.speed = SPEED_NORMAL
                     
                     try:
-                        # Check if we can access intermediate_pos safely
-                        if "PRE_EXTEND_POS" in robot.intermediate_pos:
-                            pre_extend_pos = robot.intermediate_pos["PRE_EXTEND_POS"]
-                            robot.moveto(*pre_extend_pos)
-                        else:
-                            print("PRE_EXTEND_POS not found in positions dictionary.")
-                            socketio.emit('function_response', {'result': "Error: Required position PRE_EXTEND_POS not found. Operation aborted for safety."})
-                            return False
+                        # Move to PRE_EXTEND_POS
+                        pre_extend_pos = robot.intermediate_pos["PRE_EXTEND_POS"]
+                        robot.moveto(*pre_extend_pos)
                     except Exception as move_error:
                         print(f"Error accessing positions or moving: {move_error}")
-                        socketio.emit('function_response', {'result': f"Error during movement: {move_error}. Operation aborted for safety."})
+                        socketio.emit('function_response', 
+                                    {'result': f"Error during movement: {move_error}. Operation aborted for safety."})
                         return False
                 else:
                     # Z is safe, just ensure X is at safe position
@@ -710,43 +621,43 @@ def device_retract_bed():
                         robot.moveto(15, current_pos[1], current_pos[2])
                     except Exception as move_error:
                         print(f"Error moving to safe X position: {move_error}")
-                        socketio.emit('function_response', {'result': f"Error during movement: {move_error}. Operation aborted for safety."})
+                        socketio.emit('function_response', 
+                                    {'result': f"Error during movement: {move_error}. Operation aborted for safety."})
                         return False
                 
-                # Now retract the bed
-                print("Moving to BED_RETRACTED position...")
+                # Now move the bed in the requested direction
+                print(f"Moving to {position_name} position...")
                 try:
-                    # Check if we can access intermediate_pos safely
-                    if "BED_RETRACTED" in robot.intermediate_pos:
-                        bed_retracted = robot.intermediate_pos["BED_RETRACTED"]
-                        robot.speed = SPEED_NORMAL
-                        robot.moveto(*bed_retracted)
-                    else:
-                        print("BED_RETRACTED not found in positions dictionary.")
-                        socketio.emit('function_response', {'result': "Error: Required position BED_RETRACTED not found. Operation aborted for safety."})
-                        return False
-                except Exception as retract_error:
-                    print(f"Error retracting bed: {retract_error}")
-                    socketio.emit('function_response', {'result': f"Error during bed retraction: {retract_error}. Operation aborted."})
+                    # Move to the target position
+                    target_position = robot.intermediate_pos[position_name]
+                    robot.speed = SPEED_NORMAL
+                    robot.moveto(*target_position)
+                except Exception as op_error:
+                    print(f"Error during bed {operation_name}: {op_error}")
+                    socketio.emit('function_response', 
+                                {'result': f"Error during bed {operation_name}: {op_error}. Operation aborted."})
                     return False
                 
-                print("3DP bed retracted successfully")
-                socketio.emit('function_response', {'result': "3DP bed retracted successfully."})
+                print(f"3DP bed {operation_name} completed successfully")
+                socketio.emit('function_response', {'result': f"3DP bed {operation_name} completed successfully."})
                 return True
             else:
                 # We should never reach here, but just in case
                 print("Failed to get position after retries. Operation aborted for safety.")
-                socketio.emit('function_response', {'result': "Failed to get position. Operation aborted for safety reasons."})
+                socketio.emit('function_response', 
+                            {'result': "Failed to get position. Operation aborted for safety reasons."})
                 return False
                 
         except Exception as e:
-            error_message = f"3DP bed couldn't be retracted: {e}"
+            error_message = f"3DP bed {operation_name} failed: {e}"
             print(error_message)
             socketio.emit('function_response', {'result': error_message})
             return False
             
+    # Initialize robot if needed through handle_robot_operation
+    # This ensures robot is properly initialized before we try to use it
     return handle_robot_operation(
-        _retract_operation,
+        _bed_operation,
         robot=global_robot
     )
 
