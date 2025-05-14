@@ -415,7 +415,7 @@ def control_panel_shutdown():
     return send_plc_command("SHUTDWN")
 
 def control_panel_sem_stage_open():
-    return send_plc_command(f"PHILIDMVL{sem_stage_opened}")
+    return send_plc_command(f"PHLIDMVL{sem_stage_opened}")
 
 def control_panel_sem_stage_partial_open(phenom_stub_lid_value, delay_seconds=7):
     """
@@ -435,7 +435,7 @@ def control_panel_sem_stage_partial_open(phenom_stub_lid_value, delay_seconds=7)
     formatted_value = f"{int(phenom_stub_lid_value):03d}"
     
     # Send the command to the PLC
-    response = send_plc_command(f"PHILIDMVL{formatted_value}")
+    response = send_plc_command(f"PHLIDMVL{formatted_value}")
     
     # Wait for the specified delay to allow the actuator to complete its movement
     print(f"Waiting {delay_seconds} seconds for linear actuator movement...")
@@ -444,7 +444,7 @@ def control_panel_sem_stage_partial_open(phenom_stub_lid_value, delay_seconds=7)
     return response
 
 def control_panel_sem_stage_close():
-    return send_plc_command(f"PHILIDMVL{sem_stage_closed}")
+    return send_plc_command(f"PHLIDMVL{sem_stage_closed}")
 
 def control_panel_gripper_home():
     return send_plc_command(f"SEMSTORG{gripper_home}")
