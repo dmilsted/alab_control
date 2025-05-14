@@ -670,7 +670,7 @@ def move_robot_manual(x, y, z, c3dp_speed):
             socketio.emit('function_response', {'result': error})
             return False
 
-    return handle_robot_operation(_move_operation)
+    return handle_robot_operation(_move_operation, robot=global_robot)
 
 def home_robot_manual():
     def _home_operation(robot):
@@ -686,7 +686,7 @@ def home_robot_manual():
             socketio.emit('function_response', {'result': error})
             return False
 
-    return handle_robot_operation(_home_operation)
+    return handle_robot_operation(_home_operation, robot=global_robot)
 
 def sem_process_action(voltage, c_height, distance, etime, origin, destination):
     def _sem_operation(robot, voltage, c_height, distance, etime, origin, destination):
