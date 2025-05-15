@@ -1076,6 +1076,7 @@ def tem_manual_prepare():
             # Position at manual mode position
             robot.speed = SPEED_NORMAL
             robot.moveto(*robot.equipment_pos["TEM_GRID_MANUAL_MODE"])
+            robot.moveto(*robot.equipment_pos["TEM_GRID_MANUAL_MODE_Z"])
             socketio.emit('function_response', {'result': "Robot positioned for manual grid placement"})
             
             print("System ready for manual grid placement")
@@ -1131,13 +1132,13 @@ def tem_manual_expose(voltage, c_height, distance, time):
             print(f"Manual TEM exposure requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={time}")
             socketio.emit('function_response', {'result': f"Manual TEM exposure requested with parameters: voltage={voltage}, c_height={c_height}, distance={distance}, time={time}"})
             
-            # Move to charger position
+            # Homing Z first
             robot.speed = SPEED_NORMAL
             robot.moveto(*robot.intermediate_pos["ZHOME"])
             socketio.emit('function_response', {'result': "Moving to charger..."})
             
             # Move to charger
-            robot.moveto(*robot.intermediate_pos["CHARGER_TEM"])
+            robot.moveto(*robot.equipment_pos["CHARGER_TEM"])
             
             # Position at calculated Z-height
             charger_z = MEASURED_BASE_HEIGHT - int(c_height)

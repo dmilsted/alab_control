@@ -13,6 +13,7 @@
             <li>Carefully place your TEM grid on the needle manually</li>
             <li>Click the "Expose Grid" button - this moves the grid to the charger, exposes it, and returns</li>
             <li>Carefully remove the exposed grid from the needle</li>
+            <li>If you have more samples, place the new grid and click the "Expose Grid" button. If not, skip this step</li>
             <li>Click "Complete Procedure" to finish the process</li>
         </ol>
         <p class="warning-text" style="color: red; font-weight: bold;">⚠️ Caution: Handle grids with extreme care to prevent contamination or damage</p>
@@ -63,14 +64,16 @@
         </div>
 
         <div class="step-card" style="border: 1px solid #ccc; padding: 15px; border-radius: 10px;">
-            <h3>Step 2: Expose the Grid</h3>
-            <p>After placing the grid manually on the needle, click this button to move to charger and expose.</p>
+            <h3>Step 2: Expose the Grid (or grids)</h3>
+            <p>After placing the grid manually on the needle, click this button to move to charger and expose. </p>
             <button class="btn btn-primary" id="expose-grid-btn" onclick="callFunction({function: 'tem_manual_expose', 
                 voltage: document.getElementById('voltage').value,
                 c_height: document.getElementById('c_height').value, 
                 distance: document.getElementById('distance').value, 
                 time: document.getElementById('time').value
             })">Expose Grid</button>
+            <br/>
+            <small class="form-text text-muted">Note: If you have multiple grids, just change them after exposing and click on this button again for each grid.</small>
         </div>
 
         <div class="step-card" style="border: 1px solid #ccc; padding: 15px; border-radius: 10px;">
