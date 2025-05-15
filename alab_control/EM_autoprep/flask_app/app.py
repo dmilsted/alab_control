@@ -45,6 +45,7 @@ PAUSE_VAC = 11
 
 # Define variables for physical control of the 3D printer
 global_robot = None
+tem_manual_state = "idle"
 connection_failures = 0
 FAILURE_THRESHOLD = 2
 POWER_CYCLE_WAIT = 15  # seconds
@@ -1044,8 +1045,19 @@ def tem_manual_prepare():
     Returns:
         Success or error message
     """
+    global tem_manual_state
+    
+    # State validation - can only run this if idle
+    if tem_manual_state != "idle":
+        message = f"Invalid operation: System must be in idle state to prepare, current state: {tem_manual_state}"
+        print(message)
+        socketio.emit('function_response', {'result': message})
+        return message
+    
     def _prepare_operation(robot):
         try:
+            global tem_manual_state
+            
             print("Manual TEM preparation requested")
             socketio.emit('function_response', {'result': "Manual TEM preparation requested"})
             
@@ -1068,6 +1080,9 @@ def tem_manual_prepare():
             
             print("System ready for manual grid placement")
             socketio.emit('function_response', {'result': "STEP 1 COMPLETE: System ready for manual grid placement. Please carefully place your grid on the needle."})
+            
+            # Update state
+            tem_manual_state = "prepared"
             return True
             
         except Exception as e:
@@ -1075,12 +1090,8 @@ def tem_manual_prepare():
             socketio.emit('function_response', {'result': f"Error during manual preparation: {e}"})
             return False
     
-    return handle_control_panel_operation(
-        lambda: handle_robot_operation(
-            _prepare_operation,
-            robot=global_robot
-        )
-    )
+    # Use handle_robot_operation directly without control panel check
+    return handle_robot_operation(_prepare_operation, robot=global_robot)
 
 def tem_manual_expose(voltage, c_height, distance, time):
     """
@@ -1100,8 +1111,19 @@ def tem_manual_expose(voltage, c_height, distance, time):
     Returns:
         Success or error message
     """
+    global tem_manual_state
+    
+    # State validation - can only run this if prepared
+    if tem_manual_state != "prepared":
+        message = f"Invalid operation: Please prepare the system first (Step 1), current state: {tem_manual_state}"
+        print(message)
+        socketio.emit('function_response', {'result': message})
+        return message
+    
     def _expose_operation(robot, voltage, c_height, distance, time):
         try:
+            global tem_manual_state
+            
             # Format voltage and time to 5 characters with leading zeros
             voltage_formatted = f"{int(voltage):05d}"
             time_formatted = f"{int(time):05d}"
@@ -1144,6 +1166,9 @@ def tem_manual_expose(voltage, c_height, distance, time):
             
             print("Robot returned to manual position for grid removal")
             socketio.emit('function_response', {'result': "STEP 2 COMPLETE: Exposure finished. Robot returned to manual position. Please carefully remove your grid from the needle."})
+            
+            # State remains "prepared" to allow multiple exposures
+            # tem_manual_state = "exposed"
             return True
             
         except Exception as e:
@@ -1151,15 +1176,14 @@ def tem_manual_expose(voltage, c_height, distance, time):
             socketio.emit('function_response', {'result': f"Error during manual exposure: {e}"})
             return False
     
-    return handle_control_panel_operation(
-        lambda: handle_robot_operation(
-            _expose_operation,
-            robot=global_robot,
-            voltage=voltage,
-            c_height=c_height,
-            distance=distance,
-            time=time
-        )
+    # Use handle_robot_operation directly without control panel check
+    return handle_robot_operation(
+        _expose_operation,
+        robot=global_robot,
+        voltage=voltage,
+        c_height=c_height,
+        distance=distance,
+        time=time
     )
 
 def tem_manual_complete():
@@ -1173,8 +1197,19 @@ def tem_manual_complete():
     Returns:
         Success or error message
     """
+    global tem_manual_state
+    
+    # State validation - can run this if prepared or exposed (allowing abort after step 1)
+    if tem_manual_state != "prepared" and tem_manual_state != "exposed":
+        message = f"Invalid operation: Please prepare the system first (Step 1), current state: {tem_manual_state}"
+        print(message)
+        socketio.emit('function_response', {'result': message})
+        return message
+    
     def _complete_operation(robot):
         try:
+            global tem_manual_state
+            
             print("Completing manual TEM procedure")
             socketio.emit('function_response', {'result': "Completing manual TEM procedure..."})
             
@@ -1190,6 +1225,9 @@ def tem_manual_complete():
             
             print("Manual TEM procedure completed successfully")
             socketio.emit('function_response', {'result': "PROCEDURE COMPLETE: System has been reset and is ready for next operation."})
+            
+            # Reset state
+            tem_manual_state = "idle"
             return True
             
         except Exception as e:
@@ -1197,12 +1235,8 @@ def tem_manual_complete():
             socketio.emit('function_response', {'result': f"Error completing manual procedure: {e}"})
             return False
     
-    return handle_control_panel_operation(
-        lambda: handle_robot_operation(
-            _complete_operation,
-            robot=global_robot
-        )
-    )
+    # Use handle_robot_operation directly without control panel check
+    return handle_robot_operation(_complete_operation, robot=global_robot)
 
 
 # Map function names to handlers
@@ -1267,6 +1301,8 @@ def tem_tray_page():
 
 @app.route('/tem_manual')
 def tem_manual_page():
+    global tem_manual_state
+    tem_manual_state = "idle"
     return render_template('tem_manual.html')
 
 @socketio.on('call_function')
