@@ -41,7 +41,7 @@ SPEED_VLOW = 0.005
 SPEED_LOW = 0.02
 SPEED_NORMAL = 0.5
 PAUSE = 2
-PAUSE_VAC = 11
+PAUSE_VAC = 3
 
 # Define variables for physical control of the 3D printer
 global_robot = None
