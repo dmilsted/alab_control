@@ -799,7 +799,7 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
 
             if stub_picked:
                 robot.moveto(*robot.intermediate_pos["ZHOME"])
-                robot.moveto(*robot.intermediate_pos["CHARGER_SEM"])
+                robot.moveto(*robot.equipment_pos["CHARGER_SEM"])
                 robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height))
 
                 socketio.emit('function_response', {'result': f"Setting at: {MEASURED_BASE_HEIGHT - int(c_height)} mm."})
@@ -975,7 +975,7 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination):
                 time.sleep(1)
                 control_panel_tem_grid_holder_close()
                 time.sleep(1)
-                robot.moveto(*robot.intermediate_pos["CHARGER_TEM"])
+                robot.moveto(*robot.equipment_pos["CHARGER_TEM"])
                 robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height))
 
                 socketio.emit('function_response', {'result': f"Setting at: {MEASURED_BASE_HEIGHT - int(c_height)} mm."})
