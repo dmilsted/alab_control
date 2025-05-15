@@ -24,7 +24,7 @@ c3dp_com_port = "COM7"
 # Define numeric values for linear actuators
 sem_stage_opened = "040"
 sem_stage_closed = "150"
-tem_grid_holder_opened = "000"
+tem_grid_holder_opened = "060"
 tem_grid_holder_closed = "150"
 rotator_faceDown = "020"
 rotator_faceUp = "155"
@@ -1080,7 +1080,7 @@ def sem_tray_page():
 
 @app.route('/sem_stage')
 def sem_stage_page():
-    return render_template('sem_stage.html', page_init_script="initSEMTray();")
+    return render_template('sem_stage.html') #, page_init_script="initSEMTray();")
 
 @app.route('/tem_tray')
 def tem_page():
@@ -1096,14 +1096,11 @@ def handle_socket_function(data):
 def handle_function():
     data = request.json
     print("Received HTTP request:", data)  # Debug log
+    
+    if data.get('function') not in function_map:
+        print(f"WARNING: Unknown function '{data.get('function')}' not found in function_map!")
+    
     result = dispatch_action(data)
-    
-    '''
-    # Only emit via Socket.IO for non-button actions
-    if data.get('function') != 'button':
-        socketio.emit('function_response', {'result': result})
-    '''
-    
     return jsonify({"status": "success", "message": result})
     
 
@@ -1119,7 +1116,7 @@ def dispatch_action(data):
     try:
         if function_type == 'button':
             return action_function(identifier)
-        elif function_type == 'sem_process':
+        elif function_type in ['sem_process', 'tem_process']:
             return action_function(
                 voltage=data.get('voltage'),
                 c_height=data.get('c_height'),
@@ -1128,37 +1125,36 @@ def dispatch_action(data):
                 origin=data.get('origin'),
                 destination=data.get('destination')
             )
-        elif function_type == 'tem_process':
-            return action_function(
-                voltage=data.get('voltage'),
-                c_height=data.get('c_height'),
-                distance=data.get('distance'),
-                etime=data.get('time'),
-                origin=data.get('origin'),
-                destination=data.get('destination')
-            )
-        elif function_type == 'c3dp_test_connectivity':
-            return action_function()
-        elif function_type == 'c3dp_test_connectivity_machine_test_page':
-            return action_function()
-        elif function_type == 'server_test_connectivity':
-            return action_function() 
-        elif function_type == 'control_panel_standby':
-            return action_function() 
-        elif function_type == 'control_panel_shutdown':
-            return action_function()
-        elif function_type == 'control_panel_sem_stage_open':
-            return action_function()
-        elif function_type == 'control_panel_sem_stage_close':
-            return action_function()
-        elif function_type == 'control_panel_tem_grid_holder_open':
-            return action_function()
-        elif function_type == 'control_panel_tem_grid_holder_close':
-            return action_function()
-        elif function_type == 'device_extend_bed':
-            return action_function()
-        elif function_type == 'device_retract_bed':
-            return action_function()
+
+        # elif function_type == 'c3dp_test_connectivity':
+        #     return action_function()
+        # elif function_type == 'c3dp_test_connectivity_machine_test_page':
+        #     return action_function()
+        # elif function_type == 'server_test_connectivity':
+        #     return action_function() 
+        # elif function_type == 'control_panel_standby':
+        #     return action_function() 
+        # elif function_type == 'control_panel_shutdown':
+        #     return action_function()
+        # elif function_type == 'control_panel_sem_stage_open':
+        #     return action_function()
+        # elif function_type == 'control_panel_sem_stage_close':
+        #     return action_function()
+        # elif function_type == 'control_panel_tem_grid_holder_open':
+        #     return action_function()
+        # elif function_type == 'control_panel_tem_grid_holder_close':
+        #     return action_function()
+        # elif function_type == 'control_panel_gripper_home':
+        #     return action_function()
+        # elif function_type == 'control_panel_gripper_close':
+        #     return action_function()
+        # elif function_type == 'device_extend_bed':
+        #     return action_function()
+        # elif function_type == 'device_retract_bed':
+        #     return action_function()
+        # elif function_type == 'robot_manual_home':
+        #     return action_function()
+
         elif function_type == 'robot_manual_move':
             return action_function(
                 x=data.get('x'),
@@ -1166,14 +1162,12 @@ def dispatch_action(data):
                 z=data.get('z'),
                 c3dp_speed = data.get('c3dp_speed')
             )
-        elif function_type == 'robot_manual_home':
-            return action_function()
         elif function_type == 'send_manual_plc_command':
                 return action_function(
                     command=data.get('command')
                 )
         else:
-            return "Function type not supported"
+            return action_function()
     except Exception as e:
         return f"Error: {str(e)}"
 
