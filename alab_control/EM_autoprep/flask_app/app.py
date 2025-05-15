@@ -1094,7 +1094,7 @@ def tem_manual_prepare():
     # Use handle_robot_operation directly without control panel check
     return handle_robot_operation(_prepare_operation, robot=global_robot)
 
-def tem_manual_expose(voltage, c_height, distance, time):
+def tem_manual_expose(voltage, c_height, distance, etime):
     """
     Expose the manually placed TEM grid.
     
@@ -1121,16 +1121,16 @@ def tem_manual_expose(voltage, c_height, distance, time):
         socketio.emit('function_response', {'result': message})
         return message
     
-    def _expose_operation(robot, voltage, c_height, distance, time):
+    def _expose_operation(robot, voltage, c_height, distance, etime):
         try:
             global tem_manual_state
             
             # Format voltage and time to 5 characters with leading zeros
             voltage_formatted = f"{int(voltage):05d}"
-            time_formatted = f"{int(time):05d}"
+            etime_formatted = f"{int(etime):05d}"
             
-            print(f"Manual TEM exposure requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={time}")
-            socketio.emit('function_response', {'result': f"Manual TEM exposure requested with parameters: voltage={voltage}, c_height={c_height}, distance={distance}, time={time}"})
+            print(f"Manual TEM exposure requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}")
+            socketio.emit('function_response', {'result': f"Manual TEM exposure requested with parameters: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}"})
             
             # Homing Z first
             robot.speed = SPEED_NORMAL
@@ -1153,11 +1153,10 @@ def tem_manual_expose(voltage, c_height, distance, time):
             # Perform exposure
             print(f"Grid will be exposed to {voltage} kV for {time} ms.")
             socketio.emit('function_response', {'result': f"Exposing grid to {voltage} kV for {time} ms..."})
-            control_panel_hvps_setting(voltage_formatted, time_formatted)
+            control_panel_hvps_setting(voltage_formatted, etime_formatted)
             
             # Wait for exposure to complete
-            exposure_time_sec = (int(time) / 1000) + 2
-            time.sleep(exposure_time_sec)
+            time.sleep(int(etime)/1000+2)
             socketio.emit('function_response', {'result': "Exposure complete"})
             
             # Return to manual position
@@ -1184,7 +1183,7 @@ def tem_manual_expose(voltage, c_height, distance, time):
         voltage=voltage,
         c_height=c_height,
         distance=distance,
-        time=time
+        etime=etime
     )
 
 def tem_manual_complete():
@@ -1350,7 +1349,7 @@ def dispatch_action(data):
             voltage=data.get('voltage'),
             c_height=data.get('c_height'),
             distance=data.get('distance'),
-            time=data.get('time')
+            etime=data.get('time')
             )
         elif function_type == 'robot_manual_move':
             return action_function(
