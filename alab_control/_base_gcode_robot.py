@@ -325,10 +325,14 @@ class BaseGcodeRobot(ABC):
         self.speed = speed / self.MAX_XY_FEEDRATE
 
     def _set_defaults(self) -> None:
-        self.write(
-            f"M203 X{round(self.MAX_XY_FEEDRATE/60, 2)} Y{round(self.MAX_XY_FEEDRATE/60, 2)} Z{round(self.MAX_Z_FEEDRATE/60, 2)}"
-        )
-        self.speed = 0.8  # set the default speed to 80% of the maximum speed
+        # Set maximum feed rates
+        self.write(f"M203 X{round(self.MAX_XY_FEEDRATE/60, 2)} Y{round(self.MAX_XY_FEEDRATE/60, 2)} Z{round(self.MAX_Z_FEEDRATE/60, 2)}")
+        
+        # Set default speed
+        self.speed = 0.5  # the default speed is 0.8, 80% of the maximum speed
+        
+        # Set stepper timeout to 2 minutes (120 seconds)
+        self.write("M17 S120")
 
     def _enable_steppers(self) -> None:
         """Enable steppers (M17 command)"""
