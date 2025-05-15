@@ -1032,12 +1032,187 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination):
         )
     )
 
+def tem_manual_prepare():
+    """
+    Prepare the system for manual TEM grid placement.
+    
+    This function:
+    1. Gets the robot ready
+    2. Turns on the TEM vacuum pump
+    3. Positions the head at TEM_GRID_MANUAL_MODE position
+    
+    Returns:
+        Success or error message
+    """
+    def _prepare_operation(robot):
+        try:
+            print("Manual TEM preparation requested")
+            socketio.emit('function_response', {'result': "Manual TEM preparation requested"})
+            
+            # Home the robot first
+            try:
+                robot.gohome()
+            except Exception as var_error:
+                print(f"An error occurred during homing: {var_error}")
+                socketio.emit('function_response', {'result': f"An error occurred during homing: {var_error}"})
+                return False
+            
+            # Turn on the TEM vacuum pump
+            control_panel_vacuum("TEM", True)
+            socketio.emit('function_response', {'result': "TEM vacuum pump activated"})
+            
+            # Position at manual mode position
+            robot.speed = SPEED_NORMAL
+            robot.moveto(*robot.equipment_pos["TEM_GRID_MANUAL_MODE"])
+            socketio.emit('function_response', {'result': "Robot positioned for manual grid placement"})
+            
+            print("System ready for manual grid placement")
+            socketio.emit('function_response', {'result': "STEP 1 COMPLETE: System ready for manual grid placement. Please carefully place your grid on the needle."})
+            return True
+            
+        except Exception as e:
+            print(f"Error during manual preparation: {e}")
+            socketio.emit('function_response', {'result': f"Error during manual preparation: {e}"})
+            return False
+    
+    return handle_control_panel_operation(
+        lambda: handle_robot_operation(
+            _prepare_operation,
+            robot=global_robot
+        )
+    )
+
+def tem_manual_expose(voltage, c_height, distance, time):
+    """
+    Expose the manually placed TEM grid.
+    
+    This function:
+    1. Moves the grid to the charger
+    2. Exposes the grid
+    3. Returns the grid to the manual position
+    
+    Args:
+        voltage: Exposure voltage
+        c_height: Container height
+        distance: Vertical shift
+        time: Exposure time
+    
+    Returns:
+        Success or error message
+    """
+    def _expose_operation(robot, voltage, c_height, distance, time):
+        try:
+            # Format voltage and time to 5 characters with leading zeros
+            voltage_formatted = f"{int(voltage):05d}"
+            time_formatted = f"{int(time):05d}"
+            
+            print(f"Manual TEM exposure requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={time}")
+            socketio.emit('function_response', {'result': f"Manual TEM exposure requested with parameters: voltage={voltage}, c_height={c_height}, distance={distance}, time={time}"})
+            
+            # Move to charger position
+            robot.speed = SPEED_NORMAL
+            robot.moveto(*robot.intermediate_pos["ZHOME"])
+            socketio.emit('function_response', {'result': "Moving to charger..."})
+            
+            # Move to charger
+            robot.moveto(*robot.intermediate_pos["CHARGER_TEM"])
+            
+            # Position at calculated Z-height
+            charger_z = MEASURED_BASE_HEIGHT - int(c_height)
+            socketio.emit('function_response', {'result': f"Setting at: {charger_z} mm."})
+            robot.moveto(z=charger_z)
+            
+            # Position at exposure height
+            exposure_z = charger_z + int(distance)
+            socketio.emit('function_response', {'result': f"Exposing at: {exposure_z} mm."})
+            robot.moveto(z=exposure_z)
+            
+            # Perform exposure
+            print(f"Grid will be exposed to {voltage} kV for {time} ms.")
+            socketio.emit('function_response', {'result': f"Exposing grid to {voltage} kV for {time} ms..."})
+            control_panel_hvps_setting(voltage_formatted, time_formatted)
+            
+            # Wait for exposure to complete
+            exposure_time_sec = (int(time) / 1000) + 2
+            time.sleep(exposure_time_sec)
+            socketio.emit('function_response', {'result': "Exposure complete"})
+            
+            # Return to manual position
+            robot.moveto(*robot.intermediate_pos["ZHOME"])
+            socketio.emit('function_response', {'result': "Moving back to manual position..."})
+            robot.moveto(*robot.equipment_pos["TEM_GRID_MANUAL_MODE"])
+            
+            print("Robot returned to manual position for grid removal")
+            socketio.emit('function_response', {'result': "STEP 2 COMPLETE: Exposure finished. Robot returned to manual position. Please carefully remove your grid from the needle."})
+            return True
+            
+        except Exception as e:
+            print(f"Error during manual exposure: {e}")
+            socketio.emit('function_response', {'result': f"Error during manual exposure: {e}"})
+            return False
+    
+    return handle_control_panel_operation(
+        lambda: handle_robot_operation(
+            _expose_operation,
+            robot=global_robot,
+            voltage=voltage,
+            c_height=c_height,
+            distance=distance,
+            time=time
+        )
+    )
+
+def tem_manual_complete():
+    """
+    Complete the manual TEM grid procedure.
+    
+    This function:
+    1. Turns off the TEM vacuum pump
+    2. Returns robot to home position
+    
+    Returns:
+        Success or error message
+    """
+    def _complete_operation(robot):
+        try:
+            print("Completing manual TEM procedure")
+            socketio.emit('function_response', {'result': "Completing manual TEM procedure..."})
+            
+            # Turn off vacuum pump
+            control_panel_vacuum("TEM", False)
+            control_panel_standby()
+            socketio.emit('function_response', {'result': "Vacuum pump turned off"})
+            
+            # Return to home positions
+            robot.moveto(*robot.intermediate_pos["ZHOME"])
+            socketio.emit('function_response', {'result': "Moving to home position..."})
+            robot.moveto(*robot.intermediate_pos["HOME"])
+            
+            print("Manual TEM procedure completed successfully")
+            socketio.emit('function_response', {'result': "PROCEDURE COMPLETE: System has been reset and is ready for next operation."})
+            return True
+            
+        except Exception as e:
+            print(f"Error completing manual procedure: {e}")
+            socketio.emit('function_response', {'result': f"Error completing manual procedure: {e}"})
+            return False
+    
+    return handle_control_panel_operation(
+        lambda: handle_robot_operation(
+            _complete_operation,
+            robot=global_robot
+        )
+    )
+
 
 # Map function names to handlers
 function_map = {
     'button': button_action,
     'sem_process': sem_process_action,
     'tem_process': tem_process_action,
+    'tem_manual_prepare': tem_manual_prepare,
+    'tem_manual_expose': tem_manual_expose,
+    'tem_manual_complete': tem_manual_complete,
     'c3dp_test_connectivity': c3dp_test_connectivity,
     'c3dp_test_connectivity_machine_test_page': c3dp_test_connectivity_machine_test_page,
     'server_test_connectivity': server_test_connectivity,
@@ -1069,6 +1244,8 @@ def get_page(page):
         return render_template('pages/sem_stage.html')
     elif page == 'tem-tray':
         return render_template('pages/tem_tray.html')
+    elif page == 'tem-manual':
+        return render_template('pages/tem_manual.html')
     else:
         return f"Page not found: {page}", 404
 
@@ -1082,11 +1259,15 @@ def sem_tray_page():
 
 @app.route('/sem_stage')
 def sem_stage_page():
-    return render_template('sem_stage.html') #, page_init_script="initSEMTray();")
+    return render_template('sem_stage.html')
 
 @app.route('/tem_tray')
-def tem_page():
+def tem_tray_page():
     return render_template('tem_tray.html')
+
+@app.route('/tem_manual')
+def tem_manual_page():
+    return render_template('tem_manual.html')
 
 @socketio.on('call_function')
 def handle_socket_function(data):
@@ -1127,36 +1308,13 @@ def dispatch_action(data):
                 origin=data.get('origin'),
                 destination=data.get('destination')
             )
-
-        # elif function_type == 'c3dp_test_connectivity':
-        #     return action_function()
-        # elif function_type == 'c3dp_test_connectivity_machine_test_page':
-        #     return action_function()
-        # elif function_type == 'server_test_connectivity':
-        #     return action_function() 
-        # elif function_type == 'control_panel_standby':
-        #     return action_function() 
-        # elif function_type == 'control_panel_shutdown':
-        #     return action_function()
-        # elif function_type == 'control_panel_sem_stage_open':
-        #     return action_function()
-        # elif function_type == 'control_panel_sem_stage_close':
-        #     return action_function()
-        # elif function_type == 'control_panel_tem_grid_holder_open':
-        #     return action_function()
-        # elif function_type == 'control_panel_tem_grid_holder_close':
-        #     return action_function()
-        # elif function_type == 'control_panel_gripper_home':
-        #     return action_function()
-        # elif function_type == 'control_panel_gripper_close':
-        #     return action_function()
-        # elif function_type == 'device_extend_bed':
-        #     return action_function()
-        # elif function_type == 'device_retract_bed':
-        #     return action_function()
-        # elif function_type == 'robot_manual_home':
-        #     return action_function()
-
+        elif function_type == 'tem_manual_expose':
+            return action_function(
+            voltage=data.get('voltage'),
+            c_height=data.get('c_height'),
+            distance=data.get('distance'),
+            time=data.get('time')
+            )
         elif function_type == 'robot_manual_move':
             return action_function(
                 x=data.get('x'),

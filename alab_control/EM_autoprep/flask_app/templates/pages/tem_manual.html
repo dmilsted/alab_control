@@ -1,0 +1,84 @@
+<div class="form-card">
+    <h1 class="main-title">TEM Manual Grid Exposition</h1>
+</div>
+
+<div class="main-container">
+<div class="form-card">
+    <h2 class="main-subtitle">Instructions</h2>
+    <div class="usage-notes">
+        <p>Follow these steps to manually expose a TEM grid:</p>
+        <ol>
+            <li>Enter the exposure parameters below</li>
+            <li>Click the "Prepare Head" button - this positions the needle and activates the vacuum</li>
+            <li>Carefully place your TEM grid on the needle manually</li>
+            <li>Click the "Expose Grid" button - this moves the grid to the charger, exposes it, and returns</li>
+            <li>Carefully remove the exposed grid from the needle</li>
+            <li>Click "Complete Procedure" to finish the process</li>
+        </ol>
+        <p class="warning-text" style="color: red; font-weight: bold;">⚠️ Caution: Handle grids with extreme care to prevent contamination or damage</p>
+    </div>
+</div>
+
+
+    <div class="form-card">
+        <h2 class="main-subtitle">Exposure Parameters</h2>
+
+        <form id="temManualForm">
+            <input type="hidden" name="function" value="tem_manual_process">
+
+            <div class="form-group">
+                <label for="voltage">Exposure Voltage:</label>
+                <input type="text" id="voltage" name="voltage" placeholder="Enter exposure voltage (ms)" value="10000">
+                <small class="form-text text-muted">Minimum: 1000, Maximum: 25000</small>
+            </div>
+
+            <div class="form-group">
+                <label for="c_height">Container height:</label>
+                <input type="text" id="c_height" name="c_height" placeholder="Enter container height (mm)" value="39">
+                <small class="form-text text-muted">Values in mm.</small>
+            </div>
+
+            <div class="form-group">
+                <label for="distance">Vertical shift:</label>
+                <input type="text" id="distance" name="distance" placeholder="Enter vertical shift distance (mm)" value="10">
+                <small class="form-text text-muted">Values in mm. Lowest: -10.0, Highest: 10.0</small>
+            </div>
+
+            <div class="form-group">
+                <label for="time">Exposure Time:</label>
+                <input type="text" id="time" name="time" placeholder="Enter exposure time (ms)" value="5000">
+                <small class="form-text text-muted">Minimum: 0, Maximum: 9999</small>
+            </div>
+        </form>
+    </div>
+
+
+<div class="form-card">
+    <h2 class="main-subtitle">Manual Control Procedure</h2>
+    <div class="workflow-container" style="display: flex; flex-direction: column; gap: 20px;">
+        <div class="step-card" style="border: 1px solid #ccc; padding: 15px; border-radius: 10px;">
+            <h3>Step 1: Prepare System for Grid Placement</h3>
+            <p>Positions the needle and activates the vacuum system.</p>
+            <button class="btn btn-primary" id="prepare-head-btn" onclick="callFunction({function: 'tem_manual_prepare'})">Prepare Head</button>
+        </div>
+
+        <div class="step-card" style="border: 1px solid #ccc; padding: 15px; border-radius: 10px;">
+            <h3>Step 2: Expose the Grid</h3>
+            <p>After placing the grid manually on the needle, click this button to move to charger and expose.</p>
+            <button class="btn btn-primary" id="expose-grid-btn" onclick="callFunction({function: 'tem_manual_expose', 
+                voltage: document.getElementById('voltage').value,
+                c_height: document.getElementById('c_height').value, 
+                distance: document.getElementById('distance').value, 
+                time: document.getElementById('time').value
+            })">Expose Grid</button>
+        </div>
+
+        <div class="step-card" style="border: 1px solid #ccc; padding: 15px; border-radius: 10px;">
+            <h3>Step 3: Complete the Procedure</h3>
+            <p>After removing the grid from the needle, click to end the procedure and reset the system.</p>
+            <button class="btn btn-primary" id="complete-procedure-btn" onclick="callFunction({function: 'tem_manual_complete'})">Complete Procedure</button>
+        </div>
+    </div>
+</div>
+
+</div>
