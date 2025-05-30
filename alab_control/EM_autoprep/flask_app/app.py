@@ -900,8 +900,8 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
         )
     )
 
-def tem_process_action(voltage, c_height, distance, etime, origin, destination):
-    def _tem_operation(robot, voltage, c_height, distance, etime, origin, destination):
+def tem_process_action(voltage, c_height, distance, etime, origin, destination, skip_laser=False):
+    def _tem_operation(robot, voltage, c_height, distance, etime, origin, destination, skip_laser):
         try:
             # Format voltage and time to 5 characters with leading zeros
             voltage = f"{int(voltage):05d}"
@@ -926,50 +926,70 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination):
             grid_pick_trials = 0
             grid_picked = False
 
-            # for now, sending direct commands. This must be changed to a function to standardise the code
             control_panel_tem_grid_holder_open()
             time.sleep(1.5)
             control_panel_vacuum("TEM",True)
-            while True:
-                if grid_pick_trials > 2:
-                    print("Grid not picked 3 times in a row. Aborted.")
-                    socketio.emit('function_response', {'result': "Grid not picked 3 times in a row. Aborted."})
-                    control_panel_vacuum("TEM",False)
-                    break
-                else:
-                    print("Trying to pick the grid...")
-                    socketio.emit('function_response', {'result': "Trying to pick the grid..."})
 
+
+            # Modified grid picking logic
+            if skip_laser:
+                print("Skipping laser verification - assuming grid was picked successfully")
+                socketio.emit('function_response', {'result': "Skipping laser verification - assuming grid was picked successfully"})
+                
+                # Still perform the physical pick-up motion
                 robot.moveto(*robot.clean_disk_pos[origin])
-                # Descending needle
                 robot.moveto(*robot.clean_disk_pos["TCTRAY_Z1"])
                 robot.speed = SPEED_LOW
-                
-                # Descending needle, slower speed
                 robot.moveto(*robot.clean_disk_pos["TCTRAY_Z2"])
                 robot.speed = SPEED_VLOW
-                
-                # Trying to collect grid delicately
                 robot.moveto(*robot.clean_disk_pos["TCTRAY_Z3"])
                 robot.moveto(*robot.clean_disk_pos["TCTRAY_Z2"])
                 robot.speed = SPEED_NORMAL
                 robot.moveto(*robot.intermediate_pos["ZHOME"])
-                print("Checking if grid was picked...")
-                socketio.emit('function_response', {'result': "Checking if grid was picked..."})
-                robot.moveto(*robot.equipment_pos["LASER_TEM"])
-                robot.moveto(*robot.equipment_pos["LASER_TEM_Z1"])
+                
+                grid_picked = True
+            else:
+                # Original laser verification logic
+                while True:
+                    if grid_pick_trials > 2:
+                        print("Grid not picked 3 times in a row. Aborted.")
+                        socketio.emit('function_response', {'result': "Grid not picked 3 times in a row. Aborted."})
+                        control_panel_vacuum("TEM",False)
+                        break
+                    else:
+                        print("Trying to pick the grid...")
+                        socketio.emit('function_response', {'result': "Trying to pick the grid..."})
 
-                if control_panel_laser_status() == "LASER1":
-                    print("Grid was picked!")
-                    socketio.emit('function_response', {'result': "Grid was picked!"})
-                    grid_picked = True
+                    robot.moveto(*robot.clean_disk_pos[origin])
+                    # Descending needle
+                    robot.moveto(*robot.clean_disk_pos["TCTRAY_Z1"])
+                    robot.speed = SPEED_LOW
+                    
+                    # Descending needle, slower speed
+                    robot.moveto(*robot.clean_disk_pos["TCTRAY_Z2"])
+                    robot.speed = SPEED_VLOW
+                    
+                    # Trying to collect grid delicately
+                    robot.moveto(*robot.clean_disk_pos["TCTRAY_Z3"])
+                    robot.moveto(*robot.clean_disk_pos["TCTRAY_Z2"])
+                    robot.speed = SPEED_NORMAL
                     robot.moveto(*robot.intermediate_pos["ZHOME"])
-                    break
-                else:
-                    print("Grid was not detected. Trying again...")
-                    socketio.emit('function_response', {'result': "Grid was not detected. Trying again..."})
-                    robot.moveto(*robot.intermediate_pos["ZHOME"])
-                    grid_pick_trials = grid_pick_trials + 1
+                    print("Checking if grid was picked...")
+                    socketio.emit('function_response', {'result': "Checking if grid was picked..."})
+                    robot.moveto(*robot.equipment_pos["LASER_TEM"])
+                    robot.moveto(*robot.equipment_pos["LASER_TEM_Z1"])
+
+                    if control_panel_laser_status() == "LASER1":
+                        print("Grid was picked!")
+                        socketio.emit('function_response', {'result': "Grid was picked!"})
+                        grid_picked = True
+                        robot.moveto(*robot.intermediate_pos["ZHOME"])
+                        break
+                    else:
+                        print("Grid was not detected. Trying again...")
+                        socketio.emit('function_response', {'result': "Grid was not detected. Trying again..."})
+                        robot.moveto(*robot.intermediate_pos["ZHOME"])
+                        grid_pick_trials = grid_pick_trials + 1
 
             if grid_picked:
                 robot.moveto(*robot.intermediate_pos["ZHOME"])
@@ -1342,7 +1362,8 @@ def dispatch_action(data):
                 distance=data.get('distance'),
                 etime=data.get('time'),
                 origin=data.get('origin'),
-                destination=data.get('destination')
+                destination=data.get('destination'),
+                skip_laser=data.get('skip_laser', False)
             )
         elif function_type == 'tem_manual_expose':
             return action_function(
