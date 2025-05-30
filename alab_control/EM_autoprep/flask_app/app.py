@@ -24,7 +24,7 @@ c3dp_com_port = "COM7"
 # Define numeric values for linear actuators
 sem_stage_opened = "040"
 sem_stage_closed = "150"
-tem_grid_holder_opened = "060"
+tem_grid_holder_opened = "100"
 tem_grid_holder_closed = "158"
 rotator_faceDown = "020"
 rotator_faceUp = "155"
@@ -926,16 +926,16 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination, 
             grid_pick_trials = 0
             grid_picked = False
 
-            control_panel_tem_grid_holder_open()
-            time.sleep(1.5)
-            control_panel_vacuum("TEM",True)
-
-
+            
             # Modified grid picking logic
             if skip_laser:
                 print("Skipping laser verification - assuming grid was picked successfully")
                 socketio.emit('function_response', {'result': "Skipping laser verification - assuming grid was picked successfully"})
                 
+                robot.moveto(x=robot.used_disk_pos[origin][0])
+                control_panel_tem_grid_holder_open()
+                time.sleep(1.5)
+                control_panel_vacuum("TEM",True)
                 robot.moveto(*robot.clean_disk_pos[origin])
                 robot.moveto(*robot.clean_disk_pos["TCTRAY_Z1"])
                 robot.speed = SPEED_LOW
@@ -956,11 +956,16 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination, 
                         robot.moveto(*robot.intermediate_pos["ZHOME"])
                         time.sleep(1)
                         control_panel_tem_grid_holder_close()
+                        time.sleep(1.5)
                         break
                     else:
                         print("Trying to pick the grid...")
                         socketio.emit('function_response', {'result': "Trying to pick the grid..."})
 
+                    robot.moveto(x=robot.used_disk_pos[origin][0])
+                    control_panel_tem_grid_holder_open()
+                    time.sleep(1.5)
+                    control_panel_vacuum("TEM",True)
                     robot.moveto(*robot.clean_disk_pos[origin])
                     # Descending needle
                     robot.moveto(*robot.clean_disk_pos["TCTRAY_Z1"])
