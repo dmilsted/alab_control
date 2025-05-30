@@ -1049,7 +1049,8 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination, 
             distance=distance, 
             etime=etime, 
             origin=origin, 
-            destination=destination
+            destination=destination,
+            skip_laser=skip_laser
         )
     )
 
