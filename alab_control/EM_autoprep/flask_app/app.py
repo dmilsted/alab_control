@@ -936,7 +936,6 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination, 
                 print("Skipping laser verification - assuming grid was picked successfully")
                 socketio.emit('function_response', {'result': "Skipping laser verification - assuming grid was picked successfully"})
                 
-                # Still perform the physical pick-up motion
                 robot.moveto(*robot.clean_disk_pos[origin])
                 robot.moveto(*robot.clean_disk_pos["TCTRAY_Z1"])
                 robot.speed = SPEED_LOW
@@ -949,12 +948,14 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination, 
                 
                 grid_picked = True
             else:
-                # Original laser verification logic
                 while True:
                     if grid_pick_trials > 2:
                         print("Grid not picked 3 times in a row. Aborted.")
                         socketio.emit('function_response', {'result': "Grid not picked 3 times in a row. Aborted."})
                         control_panel_vacuum("TEM",False)
+                        robot.moveto(*robot.intermediate_pos["ZHOME"])
+                        time.sleep(1)
+                        control_panel_tem_grid_holder_close()
                         break
                     else:
                         print("Trying to pick the grid...")
@@ -1010,10 +1011,10 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination, 
                 
                 print(f"Delivering grid to {destination}.")
                 socketio.emit('function_response', {'result': f"Delivering grid to {destination}."})
+                #Moving X and Y separatelyto ensure the grid never passes over another grid to avoid cross-contamination:
+                robot.moveto(x=robot.used_disk_pos[destination][0])
                 control_panel_tem_grid_holder_open()
                 time.sleep(1)
-                #Moving X and Y separatelyto ensure the grid never passes over another grid to avoid cross-contamination:
-                robot.moveto(x=robot.used_disk_pos[destination][0]) 
                 robot.moveto(y=robot.used_disk_pos[destination][1])
                 robot.moveto(*robot.used_disk_pos["TETRAY_Z1"])
                 robot.speed = SPEED_LOW
