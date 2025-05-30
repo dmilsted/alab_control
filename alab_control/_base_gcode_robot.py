@@ -331,8 +331,8 @@ class BaseGcodeRobot(ABC):
         # Set default speed
         self.speed = 0.5  # the default speed is 0.8, 80% of the maximum speed
         
-        # Set stepper timeout to 2 minutes (120 seconds)
-        self.write("M17 S120")
+        # Set stepper timeout to 10 minutes (120 seconds)
+        self.write("M17 S600")
 
     def _enable_steppers(self) -> None:
         """Enable steppers (M17 command)"""
