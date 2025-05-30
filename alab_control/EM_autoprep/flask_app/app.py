@@ -932,7 +932,7 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination, 
                 print("Skipping laser verification - assuming grid was picked successfully")
                 socketio.emit('function_response', {'result': "Skipping laser verification - assuming grid was picked successfully"})
                 
-                robot.moveto(x=robot.used_disk_pos[origin][0])
+                robot.moveto(x=robot.clean_disk_pos[origin][0])
                 control_panel_tem_grid_holder_open()
                 time.sleep(1.5)
                 control_panel_vacuum("TEM",True)
@@ -962,7 +962,7 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination, 
                         print("Trying to pick the grid...")
                         socketio.emit('function_response', {'result': "Trying to pick the grid..."})
 
-                    robot.moveto(x=robot.used_disk_pos[origin][0])
+                    robot.moveto(x=robot.clean_disk_pos[origin][0])
                     control_panel_tem_grid_holder_open()
                     time.sleep(1.5)
                     control_panel_vacuum("TEM",True)
