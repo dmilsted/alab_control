@@ -66,6 +66,15 @@
                 </select>
             </div>
 
+            <div class="form-group">
+                <label style="display: flex; align-items: center; gap: 10px;">
+                    <input type="checkbox" id="skip_laser" name="skip_laser" value="true">
+                    <span>Skip laser verification</span>
+                    <small class="form-text text-muted">proceed without checking if grid was picked up</small>
+                </label>
+                <small class="form-text text-muted" style="color: #f44336;">⚠️ Warning: Skipping verification may result in process continuation without a grid</small>
+            </div>
+
             <div class="button-group">
                 <button type="submit" class="btn btn-secondary">Prepare Sample</button>
             </div>
