@@ -485,9 +485,9 @@ def control_panel_hvps_setting(v,t):
 def control_panel_vacuum(destination,status=False):
     if destination == "SEM":
         if status:
-            send_plc_command("SEMPREPVAC1") #temporarily set to TEM pump due to the SEM one being broken right now
+            send_plc_command("SEMPREPVAC1")
         else:
-            send_plc_command("SEMSTORVAC0") #SEMSTORVAC0
+            send_plc_command("SEMSTORVAC0")
     if destination == "TEM":
         if status:
             send_plc_command("TEMPREPVAC1")
@@ -826,7 +826,9 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
                     robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
                     robot.speed = SPEED_NORMAL
                     robot.moveto(*robot.intermediate_pos["ZHOME"])
-                    robot.moveto(*robot.intermediate_pos["HOME"])
+                    #homing in X and Y only so the machine doesn't do two bed retractions
+                    robot.moveto(x=robot.intermediate_pos["HOME"][0])
+                    robot.moveto(y=robot.intermediate_pos["HOME"][1])
                 else:
                     print(f"Delivering stub to stage: {destination}.")
                     socketio.emit('function_response', {'result': f"Delivering stub to stage: {destination}."})
@@ -872,12 +874,12 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
                     robot.moveto(*robot.phenom_stub_pos["PH_Z5"])
                     #opening gripper
                     control_panel_gripper_home()
-                    robot.moveto(*robot.intermediate_pos["ZHOME"])
-                    control_panel_sem_stage_close()
-                    robot.moveto(*robot.intermediate_pos["HOME"])
                     robot.speed = SPEED_NORMAL
                     robot.moveto(*robot.intermediate_pos["ZHOME"])
-                    robot.moveto(*robot.intermediate_pos["HOME"])
+                    control_panel_sem_stage_close()
+                    #homing in X and Y only so the machine doesn't do two bed retractions
+                    robot.moveto(x=robot.intermediate_pos["HOME"][0])
+                    robot.moveto(y=robot.intermediate_pos["HOME"][1])
 
             device_step_final(robot)
             return True
@@ -1034,7 +1036,9 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination, 
                 time.sleep(1)
                 control_panel_tem_grid_holder_close()
                 time.sleep(1)
-                robot.moveto(*robot.intermediate_pos["HOME"])
+                #homing in X and Y only so the machine doesn't do two bed retractions
+                robot.moveto(x=robot.intermediate_pos["HOME"][0])
+                robot.moveto(y=robot.intermediate_pos["HOME"][1])
                 
 
             device_step_final(robot)
@@ -1362,7 +1366,18 @@ def dispatch_action(data):
     try:
         if function_type == 'button':
             return action_function(identifier)
-        elif function_type in ['sem_process', 'tem_process']:
+        elif function_type == 'sem_process':
+            # SEM process - original parameters (no skip_laser)
+            return action_function(
+                voltage=data.get('voltage'),
+                c_height=data.get('c_height'),
+                distance=data.get('distance'),
+                etime=data.get('time'),
+                origin=data.get('origin'),
+                destination=data.get('destination')
+            )
+        elif function_type == 'tem_process':
+            # TEM process - includes skip_laser parameter
             return action_function(
                 voltage=data.get('voltage'),
                 c_height=data.get('c_height'),
@@ -1370,7 +1385,7 @@ def dispatch_action(data):
                 etime=data.get('time'),
                 origin=data.get('origin'),
                 destination=data.get('destination'),
-                skip_laser=data.get('skip_laser', False)
+                skip_laser=data.get('skip_laser', False)  # Default to False if not provided
             )
         elif function_type == 'tem_manual_expose':
             return action_function(
