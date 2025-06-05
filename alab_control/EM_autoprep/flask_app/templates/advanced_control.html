@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Manual Control - EM Autoprep System</title>
+    <script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/plc_control.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+</head>
+<body>
+    <div class="main-container">
+        <!-- Left side - Content -->
+        <div class="content-area">
+            <h1 class="main-title">Advanced Manual Control</h1>
+            <p class="main-subtitle">Advanced control functions for system maintenance and troubleshooting</p>
+
+            <div class="form-card">
+                <div class="usage-notes" style="text-align: center;">
+                    <p><b>⚠️ ⚠️ ⚠️ IMPORTANT ⚠️ ⚠️ ⚠️</b></p>
+                    <p>Misusing these functions might break machine parts! <br/> Please <B>read</B> the instructions for each manual control module <b>before</b> using them!</p>
+                </div>
+            </div>
+
+            <div class="form-card">
+                <h2 class="main-subtitle">3DP - Direct Control</h2>
+
+                <div class="usage-notes" style="text-align: center;">
+                    <p><b>Instructions</b></p>
+                    <p>1. Home the 3DP before sending positions</p>
+                    <p>2. Always move the head (Z axis) to values below 15 before moving X and Y.</p>
+                    <p>3. Do not exceed an speed of 0.5.</p>
+                    <p>4. X = head, left and right. 0 = left, 220 = max right.</p>
+                    <p>5. Y = bed, back and forth. 0 = back, 220 = max forth.</p>
+                    <p>6. Z = head, up and down. 0 = max up, > 0 = down. No validation, be careful!</p>
+                </div>
+
+                <div class="form-group" style="text-align: center;">
+                    <div class="input-group">
+                        <br /><br />
+                        <label for="x-coord">X:</label>
+                        <input type="number" id="x-coord" style="width: 70px;" placeholder="X" step="0.1" min="0" max="220">
+
+                        <label for="y-coord">Y:</label>
+                        <input type="number" id="y-coord" style="width: 70px;" placeholder="Y" step="0.1" min="0" max="220">
+
+                        <label for="z-coord">Z:</label>
+                        <input type="number" id="z-coord" style="width: 70px;" placeholder="Z" step="0.1">
+
+                        <label for="3dp-speed">Speed:</label>
+                        <input type="number" id="3dp-manual-speed" style="width: 70px;" placeholder="0.01 to 0.5" value="0.4" step="0.01" min="0.01" max="0.5">
+                        <br /><br />
+
+                        <button class="btn btn-primary" data-function="robot_manual_home" id="manual-home-btn">Home 3DP</button>
+                        <button class="btn btn-primary" data-function="robot_manual_move" id="manual-move-btn">Send</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-card">
+                <h2 class="main-subtitle">PLC - Direct Control</h2>
+
+                <!-- Assisted Manual Control Section -->
+                <div class="form-group" style="text-align: center;">
+                    <div class="form-group">
+                        
+                        <div class="usage-notes" style="text-align: center;">
+                            <p><b>Instructions</b></p>
+                            <p>1. If you know the command you need to send, type it in the input box and click Send.</p>
+                            <p>2. If you need assistance, select the command you want to send from the dropdown menu.</p>
+                            <p>3. After selecting an option, part of the command will be automatically inserted in the input box.</p>
+                            <p>4. Buttons or input boxes will appear to help you to craft your command. Click or type following your needs.</p>
+                            <p>5. After the command is finished, you may click on Send to send it to the PLC.</p>
+                        </div>
+                        <div class="usage-notes" style="text-align: center;">
+                            <p><b>Important considerations </b></p>
+                            <p>⚠️ Be careful to not use the gripper when the head is too low.</p>
+                            <p>⚠️ Be careful to not open or close the TEM grid when the Stage cover is retracted.</p>
+                            <p>⚠️ Be careful to not cover or uncover the SEM Stage with the head too low, or any element on its way.</p>
+                        </div>
+
+                        <div class="input-group">
+                            <h3>Assisted Manual Control</h3>
+                            <select id="plc-command-select" style="width: 150px;">
+                                <option value="">Select command...</option>
+                                <option value="standby">Standby</option>
+                                <option value="stage-lid">Stage Lid</option>
+                                <option value="tem-prep">TEM preparation</option>
+                                <option value="tem-storage">TEM storage</option>
+                                <option value="sem-prep">SEM preparation</option>
+                                <option value="sem-storage">SEM Storage</option>
+                                <option value="hvps">HVPS control</option>
+                                <option value="vibration">Vibration Control</option>
+                                <option value="shutdown">Shutdown</option>
+                            </select>
+                        </div>
+
+                        <!-- Dynamic content area - will be populated by JavaScript -->
+                        <div id="plc-dynamic-controls" class="input-group" style="margin-top: 10px;">
+                            <!-- Dynamic content will be inserted here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Manual Control Section -->
+                <div class="form-group" style="text-align: center;">
+                    <div class="form-group">
+                        <h3>Manual Control</h3>
+
+                        <div class="input-group">
+                            <input type="text" id="plc-command-input" maxlength="20" style="width: 400px;"
+                                placeholder="Type your string here">
+                            <button class="btn btn-primary" data-function="send_manual_plc_command" id="plc-send-btn">Send</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right side - Terminal -->
+        <div class="terminal-container">
+            <div class="terminal-header">
+                <span>Terminal Output</span>
+            </div>
+            <div id="terminal" class="terminal-content">
+                <div id="terminal-output"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize socket connection
+        window.socket = io();
+
+        // Global functions similar to main.js
+        window.callFunction = function(data) {
+            let httpMessage = "";
+            if (data.function === 'button') {
+                httpMessage = `HTTP request: ${data.id} clicked`;
+            } else {
+                httpMessage = `HTTP request: ${data.function} called`;
+            }
+            
+            window.addToTerminal(httpMessage);
+            
+            fetch('/handle_function', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(data)
+            })
+            .then(response => response.json())
+            .then(data => {
+                window.addToTerminal(`Response: ${data.message}`);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                window.addToTerminal(`Error: ${error}`);
+            });
+        };
+
+        window.addToTerminal = function(message) {
+            console.log("Adding to terminal:", message);
+            const terminalOutput = document.getElementById('terminal-output');
+            if (terminalOutput) {
+                const line = document.createElement('div');
+                line.textContent = `> ${message}`;
+                terminalOutput.appendChild(line);
+                terminalOutput.scrollTop = terminalOutput.scrollHeight;
+            }
+        };
+
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            const socket = io();
+
+            // Socket.IO handlers (copied from main.js)
+            socket.on('connect', () => {
+                console.log('Socket.IO connected');
+                window.addToTerminal('Socket.IO connected');
+            });
+
+            socket.on('disconnect', () => {
+                console.log('Socket.IO disconnected');
+                window.addToTerminal('Socket.IO disconnected');
+            });
+
+            socket.on('function_response', function(data) {
+                console.log("Received function_response:", data);
+                window.addToTerminal(data.result);
+            });
+
+            socket.on('connect_error', (error) => {
+                console.error('Socket.IO connect_error:', error);
+                window.addToTerminal(`Socket.IO connect_error: ${error}`);
+            });
+
+            // Initialize manual controls
+            initializeManualControls();
+            
+            // Initialize PLC controls
+            if (typeof window.initializePLCControls === 'function') {
+                window.initializePLCControls();
+            }
+        });
+
+        // Functions to manually control the 3DP (copied from main.js)
+        function initializeManualControls() {
+            const moveBtn = document.getElementById('manual-move-btn');
+            const homeBtn = document.getElementById('manual-home-btn');
+
+            if (moveBtn) {
+                moveBtn.addEventListener('click', function() {
+                    const x = document.getElementById('x-coord').value;
+                    const y = document.getElementById('y-coord').value;
+                    const z = document.getElementById('z-coord').value;
+                    const c3dp_speed = document.getElementById('3dp-manual-speed').value;
+                    
+                    const data = {
+                        function: 'robot_manual_move',
+                        x: x,
+                        y: y,
+                        z: z,
+                        c3dp_speed: c3dp_speed
+                    };
+                    
+                    window.callFunction(data);
+                });
+            }
+
+            if (homeBtn) {
+                homeBtn.addEventListener('click', function() {
+                    const data = {
+                        function: 'robot_manual_home'
+                    };
+                    window.callFunction(data);
+                });
+            }
+
+            // Handle send manual PLC command
+            const sendButton = document.getElementById('plc-send-btn');
+            if (sendButton) {
+                sendButton.addEventListener('click', function() {
+                    const commandInput = document.getElementById('plc-command-input');
+                    const command = commandInput.value;
+                    if (command) {
+                        const data = {
+                            function: 'send_manual_plc_command',
+                            command: command
+                        };
+                        window.callFunction(data);
+                    }
+                });
+            }
+        }
+    </script>
+</body>
+</html>

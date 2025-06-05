@@ -13,7 +13,7 @@
     </div>
 </div>
 <div class="form-card">
-    <h2 class="main-subtitle">Manual use and maintenance</h2>
+    <h2 class="main-subtitle">Manual Use</h2>
     <div class="button-group">
         <button class="btn btn-primary" data-function="device_extend_bed" id="button4">Extend bed</button>
         <button class="btn btn-primary" data-function="device_retract_bed" id="button5">Retract bed</button>
@@ -33,6 +33,16 @@
             <br /><br /> send "standby"</button>
         <button class="btn btn-primary" data-function="control_panel_shutdown" data-id="button13">Control panel:
             <br /><br />send "shutdown"</button>
+        <button class="btn btn-secondary" onclick="window.open('/advanced_control', '_blank')" id="advanced-control-btn">Advanced Manual Control
+            <br /><br />(opens new tab)</button>
+    </div>
+</div>
+<div class="form-card">
+    <h2 class="main-subtitle">Maintenance tests</h2>
+    <div class="button-group">
+        <button class="btn btn-primary" data-function="none" id="button14">Soak tests</button>
+        <button class="btn btn-primary" data-function="None" id="button15">Other tests?</button>
+        <button class="btn btn-primary" onclick="window.open('http://localhost:8000/stats', '_blank')" id="button16">Stats Page</button>
     </div>
 </div>
 <div class="form-card">

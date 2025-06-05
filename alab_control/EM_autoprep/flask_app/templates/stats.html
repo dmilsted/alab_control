@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EM Autoprep Statistics</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        /* Additional styles specific to stats page */
+        .stats-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 30px;
+            margin: 20px 0;
+        }
+        
+        .stats-card {
+            background-color: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            border: 1px solid #e0e0e0;
+        }
+        
+        .stats-card h2 {
+            color: #3f51b5;
+            margin-top: 0;
+            margin-bottom: 20px;
+            font-size: 1.4em;
+            border-bottom: 2px solid #3f51b5;
+            padding-bottom: 10px;
+        }
+        
+        .stats-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+        }
+        
+        .stats-table th,
+        .stats-table td {
+            border: 1px solid #ddd;
+            padding: 12px 8px;
+            text-align: left;
+        }
+        
+        .stats-table th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .stats-table tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        
+        .stats-table tr:hover {
+            background-color: #f0f0f0;
+        }
+        
+        .success-rate {
+            font-weight: bold;
+        }
+        
+        .success-rate.high {
+            color: #28a745;
+        }
+        
+        .success-rate.medium {
+            color: #ffc107;
+        }
+        
+        .success-rate.low {
+            color: #dc3545;
+        }
+        
+        .error-count {
+            font-weight: bold;
+            color: #dc3545;
+        }
+        
+        .no-data {
+            text-align: center;
+            color: #666;
+            font-style: italic;
+            padding: 20px;
+        }
+        
+        .refresh-info {
+            background-color: #e3f2fd;
+            border: 1px solid #2196f3;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 20px 0;
+            color: #1976d2;
+        }
+        
+        .control-panel {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+        
+        .control-panel h1 {
+            margin: 0;
+            color: #333;
+        }
+        
+        .control-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .truncated-error {
+            max-width: 400px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            cursor: help;
+        }
+        
+        .summary-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .summary-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .summary-card h3 {
+            margin: 0 0 10px 0;
+            font-size: 1.1em;
+        }
+        
+        .summary-card .value {
+            font-size: 2em;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        
+        .summary-card .label {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+    </style>
+</head>
+<body>
+    <div class="stats-container">
+        <div class="control-panel">
+            <h1>EM Autoprep System Statistics</h1>
+            <div class="control-buttons">
+                <button class="btn btn-primary" onclick="window.location.reload()">
+                    <i class="fas fa-refresh"></i> Refresh Data
+                </button>
+                <button class="btn btn-secondary" onclick="window.open('/api/stats/export', '_blank')">
+                    <i class="fas fa-download"></i> Export Data
+                </button>
+                <button class="btn btn-primary" onclick="window.location.href='/'">
+                    <i class="fas fa-home"></i> Back to Main
+                </button>
+            </div>
+        </div>
+
+        <div class="refresh-info">
+            <strong>📊 Data Collection Info:</strong> Statistics are updated in real-time as processes run. 
+            Last updated: <span id="last-updated">{{ last_updated }}</span>
+        </div>
+
+        <!-- Summary Statistics -->
+        <div class="summary-stats">
+            <div class="summary-card">
+                <h3>Total Processes</h3>
+                <div class="value">{{ summary.total_processes or 0 }}</div>
+                <div class="label">Last 30 Days</div>
+            </div>
+            <div class="summary-card">
+                <h3>Overall Success Rate</h3>
+                <div class="value">{{ "%.1f"|format(summary.overall_success_rate or 0) }}%</div>
+                <div class="label">All Process Types</div>
+            </div>
+            <div class="summary-card">
+                <h3>Total Errors</h3>
+                <div class="value">{{ summary.total_errors or 0 }}</div>
+                <div class="label">All Components</div>
+            </div>
+            <div class="summary-card">
+                <h3>Avg Duration</h3>
+                <div class="value">{{ "%.1f"|format(summary.avg_duration or 0) }}s</div>
+                <div class="label">Successful Processes</div>
+            </div>
+        </div>
+
+        <!-- Main Statistics Grid -->
+        <div class="stats-grid">
+            <!-- Success Rates Card -->
+            <div class="stats-card">
+                <h2>📈 Success Rates by Process Type (Last 30 Days)</h2>
+                {% if success_rates %}
+                <table class="stats-table">
+                    <thead>
+                        <tr>
+                            <th>Process Type</th>
+                            <th>Total Runs</th>
+                            <th>Successful</th>
+                            <th>Success Rate</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for rate in success_rates %}
+                        <tr>
+                            <td>{{ rate.process_type }}</td>
+                            <td>{{ rate.total_runs }}</td>
+                            <td>{{ rate.successful_runs }}</td>
+                            <td>
+                                <span class="success-rate {% if rate.success_rate >= 90 %}high{% elif rate.success_rate >= 70 %}medium{% else %}low{% endif %}">
+                                    {{ rate.success_rate }}%
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="no-data">No process data available yet. Run some processes to see statistics.</div>
+                {% endif %}
+            </div>
+
+            <!-- Error Categories Card -->
+            <div class="stats-card">
+                <h2>⚠️ Error Categories Summary</h2>
+                {% if error_categories %}
+                <table class="stats-table">
+                    <thead>
+                        <tr>
+                            <th>Error Category</th>
+                            <th>Count</th>
+                            <th>Percentage</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for category in error_categories %}
+                        <tr>
+                            <td>{{ category.error_category }}</td>
+                            <td><span class="error-count">{{ category.count }}</span></td>
+                            <td>{{ "%.1f"|format(category.percentage) }}%</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="no-data">No error data available yet.</div>
+                {% endif %}
+            </div>
+
+            <!-- Common Errors Card -->
+            <div class="stats-card">
+                <h2>🔍 Most Common Errors (Top 10)</h2>
+                {% if common_errors %}
+                <table class="stats-table">
+                    <thead>
+                        <tr>
+                            <th>Error Message</th>
+                            <th>Component</th>
+                            <th>Count</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for error in common_errors %}
+                        <tr>
+                            <td>
+                                <span class="truncated-error" title="{{ error.error_message }}">
+                                    {% if error.error_message|length > 50 %}
+                                        {{ error.error_message[:50] }}...
+                                    {% else %}
+                                        {{ error.error_message }}
+                                    {% endif %}
+                                </span>
+                            </td>
+                            <td>{{ error.component or 'N/A' }}</td>
+                            <td><span class="error-count">{{ error.count }}</span></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="no-data">No error data available yet.</div>
+                {% endif %}
+            </div>
+
+            <!-- Daily Process Counts Card -->
+            <div class="stats-card">
+                <h2>📅 Daily Process Activity (Last 7 Days)</h2>
+                {% if process_counts %}
+                <table class="stats-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Total Processes</th>
+                            <th>Successful</th>
+                            <th>Failed</th>
+                            <th>Success Rate</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for count in process_counts %}
+                        {% set failed = count.total_processes - count.successful_processes %}
+                        {% set rate = (count.successful_processes / count.total_processes * 100) if count.total_processes > 0 else 0 %}
+                        <tr>
+                            <td>{{ count.time_period }}</td>
+                            <td>{{ count.total_processes }}</td>
+                            <td>{{ count.successful_processes }}</td>
+                            <td>{{ failed }}</td>
+                            <td>
+                                <span class="success-rate {% if rate >= 90 %}high{% elif rate >= 70 %}medium{% else %}low{% endif %}">
+                                    {{ "%.1f"|format(rate) }}%
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="no-data">No daily activity data available yet.</div>
+                {% endif %}
+            </div>
+
+            <!-- Performance Metrics Card -->
+            <div class="stats-card">
+                <h2>⚡ Performance Metrics</h2>
+                {% if performance_metrics %}
+                <table class="stats-table">
+                    <thead>
+                        <tr>
+                            <th>Process Type</th>
+                            <th>Successful Runs</th>
+                            <th>Avg Duration (s)</th>
+                            <th>Min Duration (s)</th>
+                            <th>Max Duration (s)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for metric in performance_metrics %}
+                        <tr>
+                            <td>{{ metric.process_type }}</td>
+                            <td>{{ metric.successful_runs }}</td>
+                            <td>{{ "%.1f"|format(metric.avg_duration) }}</td>
+                            <td>{{ "%.1f"|format(metric.min_duration) }}</td>
+                            <td>{{ "%.1f"|format(metric.max_duration) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="no-data">No performance data available yet.</div>
+                {% endif %}
+            </div>
+
+            <!-- Component Reliability Card -->
+            <div class="stats-card">
+                <h2>🔧 Component Reliability</h2>
+                {% if component_reliability %}
+                <table class="stats-table">
+                    <thead>
+                        <tr>
+                            <th>Component</th>
+                            <th>Total Errors</th>
+                            <th>Affected Processes</th>
+                            <th>Last Error</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for comp in component_reliability %}
+                        <tr>
+                            <td>{{ comp.component }}</td>
+                            <td><span class="error-count">{{ comp.total_errors }}</span></td>
+                            <td>{{ comp.affected_processes }}</td>
+                            <td>{{ comp.last_error[:16] if comp.last_error else 'N/A' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="no-data">No component error data available yet.</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div style="text-align: center; margin-top: 40px; padding: 20px; color: #666; border-top: 1px solid #eee;">
+            <p>EM Autoprep System Statistics Dashboard | Data automatically collected during system operation</p>
+            <p><strong>Tip:</strong> This page auto-refreshes data when you reload. Consider bookmarking for easy access!</p>
+        </div>
+    </div>
+
+    <script>
+        // Update the last updated timestamp
+        document.getElementById('last-updated').textContent = new Date().toLocaleString();
+        
+        // Auto-refresh every 5 minutes (optional)
+        // setTimeout(() => window.location.reload(), 300000);
+    </script>
+</body>
+</html>

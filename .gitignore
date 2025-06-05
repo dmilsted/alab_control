@@ -141,3 +141,6 @@ dmypy.json
 
 .DS_Store
 example/.DS_Store
+
+#EMS Bot database
+alab_control/EM_autoprep/flask_app/em_autoprep.db

@@ -8,6 +8,21 @@ import subprocess
 import csv
 import os
 import time
+from datetime import datetime
+import time as time_module  # Import as time_module to avoid conflict with the 'time' variable
+from database import (
+    init_database, 
+    start_process_run, 
+    end_process_run, 
+    log_error, 
+    log_standalone_error,
+    get_success_rate_by_process_type,
+    get_most_common_errors,
+    get_process_counts_by_time_period,
+    get_error_categories_summary,
+    get_performance_metrics,
+    get_component_reliability
+)
 
 app = Flask(__name__)
 socketio = SocketIO(app, async_mode='threading')  # Important: Specify async_mode
@@ -64,20 +79,22 @@ phenom_holder_positions_filename = 'phenom_stubs.csv'
 #phenom_handler_filename = 'phenom_handler.csv' # TODO - delete this?
 stubs_tray_filename = 'stubs_tray.csv'
 
+current_process_runs = {}
+
+def initialize_app():
+    """Initialize the application including database setup."""
+    try:
+        print("Initializing EM Autoprep application...")
+        init_database()
+        print("Application initialization completed successfully")
+    except Exception as e:
+        print(f"Error during application initialization: {e}")
+        log_standalone_error(f"Application initialization failed: {e}", "system")
+
 def float_or_none(s):
   if s == 'None':
     return None
   return float(s)
-
-'''
-def read_CSV_into_positions(path): 
-  with open(path, mode ='r') as file:
-    csvFile = csv.reader(file)
-    for lines in csvFile:
-      #Each line has a list of 4 arguments, argument 0 is the name of the position, and argument 1, 2, 3 correspond to x, y, z, respectively
-      positions[lines[0]] = ((float_or_none(lines[1]), float_or_none(lines[2]), float_or_none(lines[3])))
-  return positions
-'''
 
 def read_CSV_into_positions(path): 
   positions = {}
@@ -1269,17 +1286,304 @@ def tem_manual_complete():
     # Use handle_robot_operation directly without control panel check
     return handle_robot_operation(_complete_operation, robot=global_robot)
 
+# Enhanced process functions with database logging
+# Add these functions to your app.py file
+
+def enhanced_sem_process_action(voltage, c_height, distance, etime, origin, destination, process_run_id=None):
+    """
+    Enhanced SEM process action with database logging.
+    This wraps your existing sem_process_action function.
+    """
+    def _enhanced_sem_operation(robot, voltage, c_height, distance, etime, origin, destination):
+        try:
+            # Call your existing sem process logic
+            return sem_process_action(voltage, c_height, distance, etime, origin, destination)
+        except Exception as e:
+            # Log specific errors during the process
+            if process_run_id:
+                log_error(process_run_id, f"SEM process error: {str(e)}", "process")
+            raise e
+    
+    try:
+        return _enhanced_sem_operation(global_robot, voltage, c_height, distance, etime, origin, destination)
+    except Exception as e:
+        if process_run_id:
+            log_error(process_run_id, f"SEM process failed: {str(e)}", determine_error_component("sem_process", str(e)))
+        return f"SEM process failed: {str(e)}"
+
+def enhanced_tem_process_action(voltage, c_height, distance, etime, origin, destination, skip_laser=False, process_run_id=None):
+    """
+    Enhanced TEM process action with database logging.
+    This wraps your existing tem_process_action function.
+    """
+    def _enhanced_tem_operation(robot, voltage, c_height, distance, etime, origin, destination, skip_laser):
+        try:
+            # Call your existing TEM process logic
+            return tem_process_action(voltage, c_height, distance, etime, origin, destination, skip_laser)
+        except Exception as e:
+            # Log specific errors during the process
+            if process_run_id:
+                log_error(process_run_id, f"TEM process error: {str(e)}", "process")
+            raise e
+    
+    try:
+        return _enhanced_tem_operation(global_robot, voltage, c_height, distance, etime, origin, destination, skip_laser)
+    except Exception as e:
+        if process_run_id:
+            log_error(process_run_id, f"TEM process failed: {str(e)}", determine_error_component("tem_process", str(e)))
+        return f"TEM process failed: {str(e)}"
+
+def enhanced_tem_manual_expose(voltage, c_height, distance, etime, process_run_id=None):
+    """
+    Enhanced TEM manual expose with database logging.
+    This wraps your existing tem_manual_expose function.
+    """
+    try:
+        # Call your existing TEM manual expose logic
+        result = tem_manual_expose(voltage, c_height, distance, etime)
+        return result
+    except Exception as e:
+        if process_run_id:
+            log_error(process_run_id, f"TEM manual expose failed: {str(e)}", determine_error_component("tem_manual", str(e)))
+        return f"TEM manual expose failed: {str(e)}"
+
+# Enhanced error handling for critical functions
+def enhanced_send_plc_command(message, process_run_id=None):
+    """
+    Enhanced PLC command function with database logging.
+    This can replace your existing send_plc_command function.
+    """
+    print('Sending to PLC >> ' + message)
+    socketio.emit('function_response', {'result': 'Sending to PLC >> ' + message})
+    
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(5)
+            s.connect((plc_ip, plc_port))
+            s.sendall(message.encode())
+            data = s.recv(1024)
+            decoded = data.decode('utf-8')
+            
+            print(f'Raw received data (length: {len(data)}): {data}')
+            print(f'Decoded data (length: {len(decoded)}): {decoded}')
+            
+            if 'MACSTAT' in decoded:
+                try:
+                    additional_data = s.recv(1024)
+                    if additional_data:
+                        decoded += additional_data.decode('utf-8')
+                        print(f'Additional data received: {additional_data.decode("utf-8")}')
+                except socket.timeout:
+                    print("No additional data after MACSTAT")
+
+            print('Socket reply>>' + decoded)
+            socketio.emit('function_response', {'result': decoded})
+            return decoded
+            
+    except socket.timeout:
+        error_message = "No response from the server (timeout)."
+        print(error_message)
+        socketio.emit('function_response', {'result': error_message})
+        
+        # Log PLC communication error
+        if process_run_id:
+            log_error(process_run_id, error_message, "PLC")
+        else:
+            log_standalone_error(error_message, "PLC")
+        
+        return error_message
+        
+    except socket.error as e:
+        error_message = f"Socket error: {e}"
+        print(error_message)
+        socketio.emit('function_response', {'result': error_message})
+        
+        # Log PLC communication error
+        if process_run_id:
+            log_error(process_run_id, error_message, "PLC")
+        else:
+            log_standalone_error(error_message, "PLC")
+        
+        return error_message
+
+def enhanced_handle_robot_operation(operation_func, *args, **kwargs):
+    """
+    Enhanced robot operation handler with database logging.
+    This can replace your existing handle_robot_operation function.
+    """
+    global global_robot, connection_failures
+    
+    # Extract process_run_id if provided
+    process_run_id = kwargs.pop('process_run_id', None)
+    
+    # Initialize robot if needed
+    if global_robot is None:
+        success, connectivity_result = c3dp_test_connectivity(complete_test=False)
+        if not success:
+            print(connectivity_result)
+            socketio.emit('function_response', {'result': connectivity_result})
+            
+            # Log robot communication error
+            if process_run_id:
+                log_error(process_run_id, connectivity_result, "robot")
+            else:
+                log_standalone_error(connectivity_result, "robot")
+            
+            return False
+    
+    # Test existing connection
+    try:
+        if not global_robot.test_connection():
+            connection_failures += 1
+            error_msg = f"Connection failed {connection_failures} times"
+            
+            if connection_failures >= FAILURE_THRESHOLD:
+                error_msg += ". Attempting reset..."
+                print(error_msg)
+                socketio.emit('function_response', {'result': error_msg})
+                
+                # Log connection issues
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "robot")
+                else:
+                    log_standalone_error(error_msg, "robot")
+                
+                success, result = c3dp_test_connectivity(complete_test=False)
+                if not success:
+                    return False
+            else:
+                print(error_msg)
+                socketio.emit('function_response', {'result': error_msg})
+                
+                # Log connection issues
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "robot")
+                else:
+                    log_standalone_error(error_msg, "robot")
+                
+                return False
+        
+        # Reset failure counter on successful connection
+        connection_failures = 0
+        
+        # Execute the requested operation
+        return operation_func(*args, **kwargs)
+        
+    except Exception as e:
+        error_msg = f"Error during operation: {str(e)}"
+        print(error_msg)
+        socketio.emit('function_response', {'result': error_msg})
+        
+        # Log robot operation error
+        if process_run_id:
+            log_error(process_run_id, error_msg, "robot")
+        else:
+            log_standalone_error(error_msg, "robot")
+        
+        return False
+
+# Enhanced TEM manual state tracking with logging
+def enhanced_tem_manual_prepare(process_run_id=None):
+    """
+    Enhanced TEM manual prepare with database logging.
+    """
+    try:
+        result = tem_manual_prepare()
+        return result
+    except Exception as e:
+        error_msg = f"TEM manual prepare failed: {str(e)}"
+        if process_run_id:
+            log_error(process_run_id, error_msg, "process")
+        else:
+            log_standalone_error(error_msg, "process")
+        return error_msg
+
+def enhanced_tem_manual_complete(process_run_id=None):
+    """
+    Enhanced TEM manual complete with database logging.
+    """
+    try:
+        result = tem_manual_complete()
+        return result
+    except Exception as e:
+        error_msg = f"TEM manual complete failed: {str(e)}"
+        if process_run_id:
+            log_error(process_run_id, error_msg, "process")
+        else:
+            log_standalone_error(error_msg, "process")
+        return error_msg
+    
+def enhanced_c3dp_test_connectivity(complete_test=False):
+    """Enhanced 3D printer connectivity test with logging."""
+    try:
+        success, result = c3dp_test_connectivity(complete_test)
+        
+        if not success:
+            log_standalone_error(f"3D printer connectivity test failed: {result}", "robot")
+        
+        return success, result
+        
+    except Exception as e:
+        error_msg = f"Error during 3D printer connectivity test: {str(e)}"
+        log_standalone_error(error_msg, "robot")
+        return False, error_msg
+
+def enhanced_control_panel_get_macstat():
+    """Enhanced MACSTAT command with logging."""
+    try:
+        result = control_panel_get_macstat()
+        
+        # Log if we get an unexpected response
+        if "error" in result.lower() or "timeout" in result.lower():
+            log_standalone_error(f"MACSTAT command failed: {result}", "PLC")
+        
+        return result
+        
+    except Exception as e:
+        error_msg = f"MACSTAT command error: {str(e)}"
+        log_standalone_error(error_msg, "PLC")
+        return error_msg
+
+# Add error logging to critical robot operations
+def log_robot_error_if_needed(operation_name, result):
+    """Helper function to log robot operation errors."""
+    if isinstance(result, str) and ("error" in result.lower() or "failed" in result.lower()):
+        log_standalone_error(f"{operation_name} failed: {result}", "robot")
+
+# Enhanced device operations with logging
+def enhanced_device_extend_bed():
+    """Enhanced bed extension with logging."""
+    try:
+        result = device_extend_bed()
+        log_robot_error_if_needed("Bed extension", result)
+        return result
+    except Exception as e:
+        error_msg = f"Bed extension error: {str(e)}"
+        log_standalone_error(error_msg, "robot")
+        return error_msg
+
+def enhanced_device_retract_bed():
+    """Enhanced bed retraction with logging."""
+    try:
+        result = device_retract_bed()
+        log_robot_error_if_needed("Bed retraction", result)
+        return result
+    except Exception as e:
+        error_msg = f"Bed retraction error: {str(e)}"
+        log_standalone_error(error_msg, "robot")
+        return error_msg
+
 
 # Map function names to handlers
 function_map = {
     'button': button_action,
-    'sem_process': sem_process_action,
-    'tem_process': tem_process_action,
-    'tem_manual_prepare': tem_manual_prepare,
-    'tem_manual_expose': tem_manual_expose,
-    'tem_manual_complete': tem_manual_complete,
+    'sem_process': sem_process_action,  # Keep original for now, enhanced version called from dispatch_action
+    'tem_process': tem_process_action,  # Keep original for now, enhanced version called from dispatch_action
+    'tem_manual_prepare': enhanced_tem_manual_prepare,
+    'tem_manual_expose': tem_manual_expose,  # Enhanced version called from dispatch_action
+    'tem_manual_complete': enhanced_tem_manual_complete,
     'c3dp_test_connectivity': c3dp_test_connectivity,
-    'c3dp_test_connectivity_machine_test_page': c3dp_test_connectivity_machine_test_page,
+    'c3dp_test_connectivity_machine_test_page': lambda: enhanced_c3dp_test_connectivity(True)[1],
     'server_test_connectivity': server_test_connectivity,
     'control_panel_standby': control_panel_standby,
     'control_panel_shutdown': control_panel_shutdown,
@@ -1290,11 +1594,12 @@ function_map = {
     'control_panel_gripper_home': control_panel_gripper_home,
     'control_panel_gripper_close': control_panel_gripper_close,
     'control_panel_rotator': control_panel_rotator,
-    'device_extend_bed': device_extend_bed,
-    'device_retract_bed': device_retract_bed,
+    'device_extend_bed': enhanced_device_extend_bed,
+    'device_retract_bed': enhanced_device_retract_bed,
     'robot_manual_move': move_robot_manual,
     'robot_manual_home': home_robot_manual,
-    'send_manual_plc_command': send_manual_plc_command
+    'send_manual_plc_command': send_manual_plc_command,
+    'control_panel_get_macstat': enhanced_control_panel_get_macstat
 }
 
 @app.route('/get_page/<page>')
@@ -1352,63 +1657,342 @@ def handle_function():
     
     result = dispatch_action(data)
     return jsonify({"status": "success", "message": result})
+
+@app.route('/advanced_control')
+def advanced_manual_control():
+    return render_template('advanced_control.html')
+
+@app.route('/stats')
+def stats_dashboard():
+    """Statistics dashboard using template."""
+    try:
+        # Gather all statistics data
+        success_rates = get_success_rate_by_process_type(30)  # Last 30 days
+        common_errors = get_most_common_errors(10)
+        process_counts = get_process_counts_by_time_period('day', 7)  # Last 7 days
+        error_categories = get_error_categories_summary()
+        
+        # Calculate summary statistics
+        summary = calculate_summary_stats(success_rates, error_categories)
+        
+        # Add performance metrics and component reliability
+        performance_metrics = get_performance_metrics()
+        component_reliability = get_component_reliability()
+        
+        # Add percentage calculation for error categories
+        total_errors = sum(cat['count'] for cat in error_categories)
+        for category in error_categories:
+            category['percentage'] = (category['count'] / total_errors * 100) if total_errors > 0 else 0
+        
+        # Render the template with all data
+        return render_template('stats.html',
+                             success_rates=success_rates,
+                             common_errors=common_errors,
+                             process_counts=process_counts,
+                             error_categories=error_categories,
+                             performance_metrics=performance_metrics,
+                             component_reliability=component_reliability,
+                             summary=summary,
+                             last_updated=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        
+    except Exception as e:
+        print(f"Error loading statistics: {e}")
+        return render_template('stats.html',
+                             success_rates=[],
+                             common_errors=[],
+                             process_counts=[],
+                             error_categories=[],
+                             performance_metrics=[],
+                             component_reliability=[],
+                             summary={},
+                             last_updated=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                             error_message=str(e))
+
+def calculate_summary_stats(success_rates, error_categories):
+    """Calculate summary statistics for the dashboard."""
+    total_processes = sum(rate['total_runs'] for rate in success_rates)
+    total_successful = sum(rate['successful_runs'] for rate in success_rates)
+    total_errors = sum(cat['count'] for cat in error_categories)
+    
+    # Calculate overall success rate
+    overall_success_rate = (total_successful / total_processes * 100) if total_processes > 0 else 0
+    
+    # Get average duration from performance metrics
+    try:
+        performance_metrics = get_performance_metrics()
+        if performance_metrics:
+            avg_duration = sum(metric['avg_duration'] for metric in performance_metrics) / len(performance_metrics)
+        else:
+            avg_duration = 0
+    except:
+        avg_duration = 0
+    
+    return {
+        'total_processes': total_processes,
+        'overall_success_rate': overall_success_rate,
+        'total_errors': total_errors,
+        'avg_duration': avg_duration
+    }
+
+# Keep the existing API routes for programmatic access
+@app.route('/api/stats/success-rates')
+def api_success_rates():
+    """API endpoint for success rates."""
+    try:
+        days = request.args.get('days', 30, type=int)
+        data = get_success_rate_by_process_type(days)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/stats/errors')
+def api_common_errors():
+    """API endpoint for common errors."""
+    try:
+        limit = request.args.get('limit', 10, type=int)
+        data = get_most_common_errors(limit)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/stats/process-counts')
+def api_process_counts():
+    """API endpoint for process counts by time period."""
+    try:
+        period = request.args.get('period', 'day')
+        days = request.args.get('days', 7, type=int)
+        data = get_process_counts_by_time_period(period, days)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/stats/error-categories')
+def api_error_categories():
+    """API endpoint for error categories summary."""
+    try:
+        data = get_error_categories_summary()
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/stats/export')
+def api_export_data():
+    """Export statistics data as JSON."""
+    try:
+        export_data = {
+            'success_rates': get_success_rate_by_process_type(30),
+            'common_errors': get_most_common_errors(20),
+            'process_counts': get_process_counts_by_time_period('day', 30),
+            'error_categories': get_error_categories_summary(),
+            'performance_metrics': get_performance_metrics(),
+            'component_reliability': get_component_reliability(),
+            'export_timestamp': datetime.now().isoformat()
+        }
+        
+        response = jsonify(export_data)
+        response.headers['Content-Disposition'] = f'attachment; filename=em_autoprep_stats_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
+        return response
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
     
 
 def dispatch_action(data):
+    """
+    Enhanced dispatch_action with database logging.
+    Replace your existing dispatch_action function with this version.
+    """
     print("Received data:", data)  # debug line
     function_type = data.get('function')
     identifier = data.get('id')
     action_function = function_map.get(function_type)
     
+    # Determine process type for logging
+    process_type = determine_process_type(function_type, data)
+    
+    # Start process run logging for major operations
+    process_run_id = None
+    start_time = time_module.time()
+    
+    if should_log_process(function_type):
+        # Extract parameters for logging
+        parameters = extract_parameters_for_logging(function_type, data)
+        process_run_id = start_process_run(process_type, parameters)
+        
+        # Store in global tracking dict
+        if process_run_id:
+            current_process_runs[process_run_id] = {
+                'start_time': start_time,
+                'function_type': function_type,
+                'process_type': process_type
+            }
+    
     if action_function is None:
-        return f"Unknown function type: {function_type}"
+        error_msg = f"Unknown function type: {function_type}"
+        if process_run_id:
+            log_error(process_run_id, error_msg, "system")
+            end_process_run(process_run_id, False, "User_Error", time_module.time() - start_time)
+        else:
+            log_standalone_error(error_msg, "system")
+        return error_msg
     
     try:
+        # Execute the function with appropriate parameters
         if function_type == 'button':
-            return action_function(identifier)
+            result = action_function(identifier)
         elif function_type == 'sem_process':
-            # SEM process - original parameters (no skip_laser)
-            return action_function(
-                voltage=data.get('voltage'),
-                c_height=data.get('c_height'),
-                distance=data.get('distance'),
-                etime=data.get('time'),
-                origin=data.get('origin'),
-                destination=data.get('destination')
-            )
-        elif function_type == 'tem_process':
-            # TEM process - includes skip_laser parameter
-            return action_function(
+            result = enhanced_sem_process_action(
                 voltage=data.get('voltage'),
                 c_height=data.get('c_height'),
                 distance=data.get('distance'),
                 etime=data.get('time'),
                 origin=data.get('origin'),
                 destination=data.get('destination'),
-                skip_laser=data.get('skip_laser', False)  # Default to False if not provided
+                process_run_id=process_run_id
+            )
+        elif function_type == 'tem_process':
+            result = enhanced_tem_process_action(
+                voltage=data.get('voltage'),
+                c_height=data.get('c_height'),
+                distance=data.get('distance'),
+                etime=data.get('time'),
+                origin=data.get('origin'),
+                destination=data.get('destination'),
+                skip_laser=data.get('skip_laser', False),
+                process_run_id=process_run_id
             )
         elif function_type == 'tem_manual_expose':
-            return action_function(
-            voltage=data.get('voltage'),
-            c_height=data.get('c_height'),
-            distance=data.get('distance'),
-            etime=data.get('time')
+            result = enhanced_tem_manual_expose(
+                voltage=data.get('voltage'),
+                c_height=data.get('c_height'),
+                distance=data.get('distance'),
+                etime=data.get('time'),
+                process_run_id=process_run_id
             )
         elif function_type == 'robot_manual_move':
-            return action_function(
+            result = action_function(
                 x=data.get('x'),
                 y=data.get('y'),
                 z=data.get('z'),
-                c3dp_speed = data.get('c3dp_speed')
+                c3dp_speed=data.get('c3dp_speed')
             )
         elif function_type == 'send_manual_plc_command':
-                return action_function(
-                    command=data.get('command')
-                )
+            result = action_function(command=data.get('command'))
         else:
-            return action_function()
+            result = action_function()
+        
+        # Log successful completion for major processes
+        if process_run_id and process_run_id in current_process_runs:
+            duration = time_module.time() - start_time
+            # Check if result indicates success (you may need to adjust this logic)
+            success = not (isinstance(result, str) and ("error" in result.lower() or "failed" in result.lower()))
+            
+            if success:
+                end_process_run(process_run_id, True, None, duration)
+            else:
+                end_process_run(process_run_id, False, "Process_Failed", duration)
+                log_error(process_run_id, str(result), "process")
+            
+            # Clean up tracking
+            del current_process_runs[process_run_id]
+        
+        return result
+        
     except Exception as e:
-        return f"Error: {str(e)}"
+        error_msg = f"Error: {str(e)}"
+        
+        # Log the error
+        if process_run_id:
+            log_error(process_run_id, error_msg, determine_error_component(function_type, str(e)))
+            duration = time_module.time() - start_time
+            end_process_run(process_run_id, False, determine_error_category(str(e)), duration)
+            
+            # Clean up tracking
+            if process_run_id in current_process_runs:
+                del current_process_runs[process_run_id]
+        else:
+            log_standalone_error(error_msg, determine_error_component(function_type, str(e)))
+        
+        return error_msg
+
+def determine_process_type(function_type, data):
+    """Determine the process type for logging purposes."""
+    if function_type == 'sem_process':
+        return 'SEM_tray'
+    elif function_type == 'tem_process':
+        return 'TEM_tray'
+    elif function_type in ['tem_manual_prepare', 'tem_manual_expose', 'tem_manual_complete']:
+        return 'TEM_manual'
+    elif 'machine_test' in function_type or 'test_connectivity' in function_type:
+        return 'machine_test'
+    elif 'control_panel' in function_type:
+        return 'control_panel'
+    elif 'robot' in function_type or 'device' in function_type:
+        return 'robot_operation'
+    else:
+        return 'other'
+
+def should_log_process(function_type):
+    """Determine if this function type should be logged as a process run."""
+    major_processes = [
+        'sem_process', 'tem_process', 'tem_manual_prepare', 
+        'tem_manual_expose', 'tem_manual_complete',
+        'c3dp_test_connectivity_machine_test_page',
+        'robot_manual_move', 'robot_manual_home'
+    ]
+    return function_type in major_processes
+
+def extract_parameters_for_logging(function_type, data):
+    """Extract relevant parameters for logging."""
+    if function_type in ['sem_process', 'tem_process', 'tem_manual_expose']:
+        return {
+            'voltage': data.get('voltage'),
+            'c_height': data.get('c_height'),
+            'distance': data.get('distance'),
+            'time': data.get('time'),
+            'origin': data.get('origin'),
+            'destination': data.get('destination'),
+            'skip_laser': data.get('skip_laser', False) if function_type == 'tem_process' else None
+        }
+    elif function_type == 'robot_manual_move':
+        return {
+            'x': data.get('x'),
+            'y': data.get('y'),
+            'z': data.get('z'),
+            'speed': data.get('c3dp_speed')
+        }
+    else:
+        return {key: value for key, value in data.items() if key != 'function'}
+
+def determine_error_category(error_message):
+    """Determine error category based on error message content."""
+    error_lower = error_message.lower()
+    
+    if any(keyword in error_lower for keyword in ['robot', '3dp', 'printer', 'serial', 'com port', 'connection']):
+        return 'Robot_Communication'
+    elif any(keyword in error_lower for keyword in ['plc', 'socket', 'timeout', 'macstat']):
+        return 'PLC_Communication'
+    elif any(keyword in error_lower for keyword in ['stub not picked', 'grid not picked', 'laser', 'position']):
+        return 'Process_Failed'
+    elif any(keyword in error_lower for keyword in ['invalid', 'parameter', 'value', 'range']):
+        return 'User_Error'
+    else:
+        return 'System_Error'
+
+def determine_error_component(function_type, error_message):
+    """Determine which component the error relates to."""
+    error_lower = error_message.lower()
+    
+    if any(keyword in error_lower for keyword in ['robot', '3dp', 'printer', 'serial']):
+        return 'robot'
+    elif any(keyword in error_lower for keyword in ['plc', 'socket', 'macstat']):
+        return 'PLC'
+    elif 'control_panel' in function_type:
+        return 'PLC'
+    elif 'robot' in function_type or 'device' in function_type:
+        return 'robot'
+    else:
+        return 'system'
 
 # UDP server function to handle commands and respond via UDP and Socket.IO
 def udp_server():
@@ -1446,8 +2030,10 @@ def parse_udp_message(message):
     except ValueError:
         return {}
 
-# Start the UDP server in a separate thread
 if __name__ == '__main__':
+    # Initialize the application and database
+    initialize_app()
+    
     # Initialize Socket.IO with engineio_logger for debugging
     socketio = SocketIO(app, logger=True, engineio_logger=True)
     
