@@ -32,7 +32,6 @@ window.initializePLCControls = function() {
                 function_name: 'plc_send_command',
                 parameters: [command]
             });
-            commandInput.value = ''; // Clear input after sending
         }
     }
 

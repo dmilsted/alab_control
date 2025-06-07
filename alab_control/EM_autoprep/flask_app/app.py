@@ -80,6 +80,8 @@ phenom_holder_positions_filename = 'phenom_stubs.csv'
 stubs_tray_filename = 'stubs_tray.csv'
 
 current_process_runs = {}
+soak_test_in_progress = False
+current_soak_test_session = None
 
 def initialize_app():
     """Initialize the application including database setup."""
@@ -1662,6 +1664,8 @@ def handle_function():
 def advanced_manual_control():
     return render_template('advanced_control.html')
 
+#region - routes related to statistics
+
 @app.route('/stats')
 def stats_dashboard():
     """Statistics dashboard using template."""
@@ -1796,8 +1800,306 @@ def api_export_data():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     
+#endregion
+
+#region - routes related to soak tests
+
+@app.route('/soak_tests')
+def soak_test_dashboard():
+    """Main soak test dashboard page."""
+    try:
+        # Get current running test (if any)
+        current_test = None
+        if soak_test_in_progress and current_soak_test_session:
+            current_test = {
+                'test_type': current_soak_test_session.get('test_type', 'Unknown'),
+                'start_time': current_soak_test_session.get('start_time', 'Unknown')
+            }
+        
+        # Get recent test history (placeholder - we'll implement database queries later)
+        recent_tests = []
+        # TODO: Query soak test database for recent tests
+        
+        # Get success rate statistics (placeholder)
+        stats = {
+            'sem_pick_place_rate': None,  # TODO: Calculate from database
+            'sem_to_stage_rate': None,
+            'tem_cycling_rate': None,
+            'communication_rate': None
+        }
+        
+        return render_template('soak_tests/dashboard.html',
+                             current_test_running=current_test,
+                             recent_tests=recent_tests,
+                             stats=stats)
+                             
+    except Exception as e:
+        print(f"Error loading soak test dashboard: {e}")
+        return render_template('soak_tests/dashboard.html',
+                             current_test_running=None,
+                             recent_tests=[],
+                             stats={},
+                             error_message=str(e))
+
+@app.route('/soak_tests/sem_pick_place')
+def sem_pick_place_test_page():
+    """SEM Pick & Place soak test page."""
+    try:
+        # Get current test session (placeholder)
+        test_session = None
+        if (soak_test_in_progress and 
+            current_soak_test_session and 
+            current_soak_test_session.get('test_type') == 'sem_pick_place'):
+            test_session = current_soak_test_session
+        
+        # Get recent errors for this test type (placeholder)
+        recent_errors = []
+        # TODO: Query database for recent errors
+        
+        return render_template('soak_tests/sem_pick_place.html',
+                             test_session=test_session,
+                             recent_errors=recent_errors)
+                             
+    except Exception as e:
+        print(f"Error loading SEM pick & place test page: {e}")
+        return render_template('soak_tests/sem_pick_place.html',
+                             test_session=None,
+                             recent_errors=[],
+                             error_message=str(e))
+
+@app.route('/soak_tests/sem_pick_place/start', methods=['POST'])
+def start_sem_pick_place_test():
+    """Start a new SEM Pick & Place soak test."""
+    global soak_test_in_progress, current_soak_test_session
+    
+    try:
+        # Check if another test is running
+        if soak_test_in_progress:
+            return jsonify({
+                'success': False,
+                'message': 'Another soak test is currently running. Please wait for it to complete.'
+            })
+        
+        # Get configuration from request
+        config = request.json
+        cycles = int(config.get('cycles', 5))
+        max_retries = int(config.get('max_retries', 3))
+        failure_handling = config.get('failure_handling', 'skip')
+        recovery_mode = config.get('recovery_mode', 'continue')
+        
+        # Validate configuration
+        if cycles < 1 or cycles > 1000:
+            return jsonify({
+                'success': False,
+                'message': 'Number of cycles must be between 1 and 1000.'
+            })
+        
+        if max_retries < 1 or max_retries > 10:
+            return jsonify({
+                'success': False,
+                'message': 'Max retries must be between 1 and 10.'
+            })
+        
+        # Set up test session
+        soak_test_in_progress = True
+        current_soak_test_session = {
+            'test_type': 'sem_pick_place',
+            'start_time': datetime.now().isoformat(),
+            'target_cycles': cycles,
+            'max_retries': max_retries,
+            'failure_handling': failure_handling,
+            'recovery_mode': recovery_mode,
+            'current_cycle': 0,
+            'current_position': None,
+            'status': 'running',
+            'total_operations': 0,
+            'successful_operations': 0,
+            'failed_operations': 0,
+            'current_success_rate': 0.0,
+            'completed_positions': [],
+            'failed_positions': [],
+            'estimated_completion': None,
+            'elapsed_time_minutes': 0
+        }
+        
+        # TODO: Start the actual test in a background thread
+        # For now, we'll just set up the session structure
+        print(f"Starting SEM Pick & Place test with {cycles} cycles")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Test started successfully'
+        })
+        
+    except Exception as e:
+        # Reset flags on error
+        soak_test_in_progress = False
+        current_soak_test_session = None
+        print(f"Error starting SEM pick & place test: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Error starting test: {str(e)}'
+        })
+
+@app.route('/soak_tests/sem_pick_place/pause', methods=['POST'])
+def pause_sem_pick_place_test():
+    """Pause the current SEM Pick & Place test."""
+    global current_soak_test_session
+    
+    try:
+        if (not soak_test_in_progress or 
+            not current_soak_test_session or 
+            current_soak_test_session.get('test_type') != 'sem_pick_place'):
+            return jsonify({
+                'success': False,
+                'message': 'No SEM Pick & Place test is currently running.'
+            })
+        
+        if current_soak_test_session.get('status') != 'running':
+            return jsonify({
+                'success': False,
+                'message': 'Test is not currently running.'
+            })
+        
+        # Pause the test
+        current_soak_test_session['status'] = 'paused'
+        # TODO: Actually pause the background test thread
+        
+        print("SEM Pick & Place test paused")
+        return jsonify({
+            'success': True,
+            'message': 'Test paused successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error pausing SEM pick & place test: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Error pausing test: {str(e)}'
+        })
+
+@app.route('/soak_tests/sem_pick_place/resume', methods=['POST'])
+def resume_sem_pick_place_test():
+    """Resume the paused SEM Pick & Place test."""
+    global current_soak_test_session
+    
+    try:
+        if (not soak_test_in_progress or 
+            not current_soak_test_session or 
+            current_soak_test_session.get('test_type') != 'sem_pick_place'):
+            return jsonify({
+                'success': False,
+                'message': 'No SEM Pick & Place test session found.'
+            })
+        
+        if current_soak_test_session.get('status') != 'paused':
+            return jsonify({
+                'success': False,
+                'message': 'Test is not currently paused.'
+            })
+        
+        # Resume the test
+        current_soak_test_session['status'] = 'running'
+        # TODO: Actually resume the background test thread
+        
+        print("SEM Pick & Place test resumed")
+        return jsonify({
+            'success': True,
+            'message': 'Test resumed successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error resuming SEM pick & place test: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Error resuming test: {str(e)}'
+        })
+
+@app.route('/soak_tests/sem_pick_place/stop', methods=['POST'])
+def stop_sem_pick_place_test():
+    """Stop the current SEM Pick & Place test."""
+    global soak_test_in_progress, current_soak_test_session
+    
+    try:
+        if (not soak_test_in_progress or 
+            not current_soak_test_session or 
+            current_soak_test_session.get('test_type') != 'sem_pick_place'):
+            return jsonify({
+                'success': False,
+                'message': 'No SEM Pick & Place test is currently running.'
+            })
+        
+        # Stop the test
+        current_soak_test_session['status'] = 'stopped'
+        current_soak_test_session['end_time'] = datetime.now().isoformat()
+        # TODO: Actually stop the background test thread
+        # TODO: Save final results to database
+        
+        # Reset global flags
+        soak_test_in_progress = False
+        current_soak_test_session = None
+        
+        print("SEM Pick & Place test stopped")
+        return jsonify({
+            'success': True,
+            'message': 'Test stopped successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error stopping SEM pick & place test: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Error stopping test: {str(e)}'
+        })
+
+# Add similar routes for other test types (placeholder stubs)
+@app.route('/soak_tests/sem_to_stage')
+def sem_to_stage_test_page():
+    """SEM to Stage transfer soak test page."""
+    # TODO: Implement similar to sem_pick_place
+    return "<h1>SEM to Stage Transfer Test</h1><p>Coming soon...</p>"
+
+@app.route('/soak_tests/tem_cycling')
+def tem_cycling_test_page():
+    """TEM Disk Cycling soak test page."""
+    # TODO: Implement similar to sem_pick_place
+    return "<h1>TEM Disk Cycling Test</h1><p>Coming soon...</p>"
+
+@app.route('/soak_tests/communication')
+def communication_test_page():
+    """Communication stress test page."""
+    # TODO: Implement similar to sem_pick_place
+    return "<h1>Communication Stress Test</h1><p>Coming soon...</p>"
+
+#endregion
 
 def dispatch_action(data):
+    """
+    Enhanced dispatch_action that blocks operations during soak tests.
+    """
+    global soak_test_in_progress
+    
+    function_type = data.get('function')
+    
+    # Check if a soak test is running and block conflicting operations
+    if soak_test_in_progress:
+        # Define operations that should be blocked during soak tests
+        blocked_operations = [
+            'sem_process', 'tem_process', 'tem_manual_prepare', 'tem_manual_expose', 
+            'tem_manual_complete', 'robot_manual_move', 'robot_manual_home', 
+            'device_extend_bed', 'device_retract_bed', 'send_manual_plc_command'
+        ]
+        
+        if function_type in blocked_operations:
+            error_msg = ("A soak test is currently running. "
+                        "Please stop the soak test before performing other operations. "
+                        "Visit the soak test page to manage the running test.")
+            print(f"Operation blocked due to soak test: {function_type}")
+            socketio.emit('function_response', {'result': error_msg})
+            return error_msg
+    
+# If no soak test is running, proceed with normal dispatch:
+def original_dispatch_action(data):
     """
     Enhanced dispatch_action with database logging.
     Replace your existing dispatch_action function with this version.
