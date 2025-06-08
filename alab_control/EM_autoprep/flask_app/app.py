@@ -39,7 +39,8 @@ from database import (
 )
 
 app = Flask(__name__)
-socketio = SocketIO(app, async_mode='threading')  # Important: Specify async_mode
+#socketio = SocketIO(app, async_mode='threading')  # This was removed because it was lagging the server. Adding eventlet (pip install eventlet) fixed the lag
+socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins="*", logger=True, engineio_logger=True)
 
 # Define IPs and ports, and 3DP COM port
 host_ip = "0.0.0.0"  # Set to listen on all interfaces

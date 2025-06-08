@@ -287,8 +287,8 @@
                         <tr>
                             <td>
                                 <span class="truncated-error" title="{{ error.error_message }}">
-                                    {% if error.error_message|length > 50 %}
-                                        {{ error.error_message[:50] }}...
+                                    {% if error.error_message|length > 30 %}
+                                        {{ error.error_message[:30] }}...
                                     {% else %}
                                         {{ error.error_message }}
                                     {% endif %}
