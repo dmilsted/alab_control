@@ -1592,7 +1592,7 @@ def enhanced_device_retract_bed():
         log_standalone_error(error_msg, "robot")
         return error_msg
     
-#region Soak test functions
+#region - SEM pick and place soak test functions
 
 def soak_test_sem_pick_place(session_id, config):
     """
@@ -2001,6 +2001,1262 @@ def test_single_position_sem(position, session_id, cycle_id, retry_count):
         # Don't raise the exception - return False to indicate failure
         # The calling function will handle retry logic
         return False
+
+#endregion
+
+#region - SEM to Stage soak test functions
+
+def soak_test_sem_to_stage(session_id, config):
+    """
+    Main SEM to Stage Transfer soak test function.
+    Tests one-way transfer from SEM tray to stage positions.
+    
+    Args:
+        session_id (int): Database session ID
+        config (dict): Test configuration
+    """
+    global soak_test_in_progress, current_soak_test_session
+    
+    # Define test sequences
+    tray_positions = ['A1', 'A2', 'A3', 'B1', 'B2', 'B3', 'C1', 'C2', 'C3', 
+                     'D1', 'D2', 'D3', 'E1', 'E2', 'E3']
+    
+    stage_positions = ['PH_STUB_A', 'PH_STUB_B', 'PH_STUB_C', 'PH_STUB_8', 'PH_STUB_10', 
+                      'PH_STUB_D', 'PH_STUB_F', 'PH_STUB_15', 'PH_STUB_17', 'PH_STUB_G', 
+                      'PH_STUB_I', 'PH_STUB_K', 'PH_STUB_20', 'PH_STUB_22', 'PH_STUB_L', 
+                      'PH_STUB_N', 'PH_STUB_27', 'PH_STUB_29', 'PH_STUB_O', 'PH_STUB_P', 
+                      'PH_STUB_Q']
+    
+    # Create transfer pairs (tray → stage)
+    transfer_pairs = []
+    for i, tray_pos in enumerate(tray_positions):
+        if i < len(stage_positions):
+            transfer_pairs.append((tray_pos, stage_positions[i]))
+    
+    max_retries = config.get('max_retries', 3)
+    failure_handling = config.get('failure_handling', 'skip')
+    
+    try:
+        print(f"Starting SEM to Stage Transfer test - Session {session_id}")
+        
+        # Initialize robot
+        robot_ready = False
+        retry_count = 0
+        max_robot_retries = 3
+        
+        while not robot_ready and retry_count < max_robot_retries:
+            if soak_test_stop_event.is_set():
+                raise Exception("Test stopped by user during initialization")
+                
+            try:
+                success, result = c3dp_test_connectivity(complete_test=False)
+                if success:
+                    robot_ready = True
+                    log_soak_test_operation(
+                        session_id, 'robot_init', None, True, 
+                        operation_data={'result': result}
+                    )
+                else:
+                    raise Exception(f"Robot initialization failed: {result}")
+                    
+            except Exception as e:
+                retry_count += 1
+                error_msg = f"Robot initialization attempt {retry_count} failed: {str(e)}"
+                print(error_msg)
+                
+                log_soak_test_error(
+                    session_id, 'Robot_Communication', error_msg,
+                    component='robot', recovery_action=f"Retry {retry_count}/{max_robot_retries}"
+                )
+                
+                if retry_count >= max_robot_retries:
+                    raise Exception(f"Failed to initialize robot after {max_robot_retries} attempts")
+                
+                time_module.sleep(5)
+        
+        # Home the robot
+        if not soak_test_stop_event.is_set():
+            try:
+                device_step_zero()
+                log_soak_test_operation(session_id, 'robot_home', None, True)
+            except Exception as e:
+                error_msg = f"Robot homing failed: {str(e)}"
+                log_soak_test_error(session_id, 'Robot_Movement', error_msg, component='robot')
+                raise Exception(error_msg)
+        
+        # Main test loop - single run through all transfers
+        total_operations = 0
+        successful_operations = 0
+        failed_operations = 0
+        
+        # Create single cycle record
+        cycle_id = create_soak_test_cycle(session_id, 1)
+        cycle_start_time = time_module.time()
+        
+        # Update session status
+        update_soak_test_session(session_id, {
+            'current_cycle': 1,
+            'target_cycles': 1,
+            'current_step': 'Starting transfers'
+        })
+        
+        # Process each transfer pair
+        for tray_pos, stage_pos in transfer_pairs:
+            if soak_test_stop_event.is_set():
+                break
+                
+            print(f"Testing transfer {tray_pos} → {stage_pos}")
+            
+            # Update current position
+            update_soak_test_session(session_id, {
+                'current_position': f"{tray_pos} → {stage_pos}",
+                'current_step': f'Transferring {tray_pos} → {stage_pos}'
+            })
+            
+            # Perform transfer operation
+            transfer_success = perform_sem_to_stage_transfer(
+                session_id, cycle_id, tray_pos, stage_pos, 
+                max_retries, failure_handling
+            )
+            
+            total_operations += 1
+            
+            if transfer_success:
+                successful_operations += 1
+                print(f"Transfer {tray_pos} → {stage_pos} - SUCCESS")
+            else:
+                failed_operations += 1
+                print(f"Transfer {tray_pos} → {stage_pos} - FAILED")
+                
+                if failure_handling == 'stop':
+                    raise Exception(f"Test stopped due to failure at {tray_pos} → {stage_pos}")
+            
+            # Update statistics after each transfer
+            current_success_rate = (successful_operations / total_operations * 100) if total_operations > 0 else 0
+            update_soak_test_session(session_id, {
+                'total_operations': total_operations,
+                'successful_operations': successful_operations,
+                'failed_operations': failed_operations,
+                'current_success_rate': current_success_rate
+            })
+        
+        # Complete the test
+        cycle_duration = time_module.time() - cycle_start_time
+        cycle_success_rate = (successful_operations / len(transfer_pairs) * 100) if len(transfer_pairs) > 0 else 0
+        
+        # Update cycle record
+        if cycle_id:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE soak_test_cycles 
+                    SET end_time = ?, status = ?, total_positions = ?, 
+                        successful_positions = ?, failed_positions = ?, success_rate = ?
+                    WHERE id = ?
+                """, (
+                    datetime.now(), 'completed', len(transfer_pairs),
+                    successful_operations, failed_operations, cycle_success_rate, cycle_id
+                ))
+                conn.commit()
+        
+        # Test completed successfully
+        session_data = get_soak_test_session(session_id)
+        start_time = datetime.fromisoformat(session_data['start_time'])
+        total_duration = (datetime.now() - start_time).total_seconds() / 60
+        
+        update_soak_test_session(session_id, {
+            'status': 'completed',
+            'end_time': datetime.now(),
+            'completed_cycles': 1,
+            'final_success_rate': cycle_success_rate,
+            'duration_minutes': total_duration,
+            'current_step': 'Test completed successfully'
+        })
+        
+        print(f"SEM to Stage Transfer test completed successfully - Final success rate: {cycle_success_rate:.1f}%")
+        
+    except Exception as e:
+        # Test failed
+        error_msg = f"SEM to Stage Transfer test failed: {str(e)}"
+        print(error_msg)
+        
+        update_soak_test_session(session_id, {
+            'status': 'failed',
+            'end_time': datetime.now(),
+            'failure_reason': str(e),
+            'current_step': 'Test failed'
+        })
+        
+        log_soak_test_error(
+            session_id, determine_soak_error_category(str(e), 'test_execution'),
+            error_msg, component='system'
+        )
+    
+    finally:
+        # Cleanup
+        print("Cleaning up SEM to Stage Transfer test")
+        
+        try:
+            # Return robot to home position
+            device_step_final()
+        except Exception as e:
+            print(f"Error during cleanup: {e}")
+        
+        # Reset global flags
+        soak_test_in_progress = False
+        current_soak_test_session = None
+        soak_test_stop_event.clear()
+
+def perform_sem_to_stage_transfer(session_id, cycle_id, tray_pos, stage_pos, max_retries, failure_handling):
+    """
+    Perform a single SEM stub transfer from tray to stage.
+    
+    Args:
+        session_id (int): Database session ID
+        cycle_id (int): Database cycle ID
+        tray_pos (str): Tray position (A1, A2, etc.)
+        stage_pos (str): Stage position (PH_STUB_A, etc.)
+        max_retries (int): Maximum retry attempts
+        failure_handling (str): Failure handling strategy
+    
+    Returns:
+        bool: True if successful, False if failed
+    """
+    global global_robot
+    
+    retry_count = 0
+    
+    while retry_count <= max_retries:
+        try:
+            if not global_robot:
+                raise Exception("Robot not initialized")
+            
+            print(f"Transferring stub {tray_pos}→{stage_pos} (attempt {retry_count + 1})")
+            
+            operation_start_time = time_module.time()
+            
+            # Step 1: Move to standby position
+            global_robot.speed = SPEED_NORMAL
+            global_robot.moveto(*global_robot.intermediate_pos["ZHOME"])
+            
+            # Step 2: Turn on SEM vacuum
+            control_panel_vacuum("SEM", True)
+            
+            # Step 3: Pick up stub from tray
+            print(f"Picking stub from {tray_pos}")
+            global_robot.moveto(*global_robot.clean_stub_pos[tray_pos])
+            
+            # Descending needle with progressive speeds
+            global_robot.moveto(*global_robot.clean_stub_pos["STRAY_Z1"])
+            global_robot.speed = SPEED_LOW
+            global_robot.moveto(*global_robot.clean_stub_pos["STRAY_Z2"])
+            global_robot.speed = SPEED_VLOW
+            global_robot.moveto(*global_robot.clean_stub_pos["STRAY_Z3"])
+            global_robot.moveto(*global_robot.clean_stub_pos["STRAY_Z2"])
+            global_robot.speed = SPEED_NORMAL
+            global_robot.moveto(*global_robot.intermediate_pos["ZHOME"])
+            
+            # Step 4: Laser verification
+            print(f"Checking laser detection for {tray_pos}")
+            global_robot.moveto(*global_robot.equipment_pos["LASER_SEM"])
+            global_robot.moveto(*global_robot.equipment_pos["LASER_SEM_Z1"])
+            
+            laser_result = control_panel_laser_status()
+            if laser_result != "LASER1":
+                print(f"Laser detection failed for {tray_pos}")
+                log_soak_test_error(
+                    session_id, 'Laser_Detection',
+                    f"Stub not detected at {tray_pos} - Expected LASER1, got {laser_result}",
+                    position=f"{tray_pos}→{stage_pos}", component='laser'
+                )
+                
+                # Turn off vacuum and retry or fail
+                global_robot.moveto(*global_robot.intermediate_pos["ZHOME"])
+                control_panel_vacuum("SEM", False)
+                
+                if failure_handling == 'retry' and retry_count < max_retries:
+                    retry_count += 1
+                    print(f"Retrying {tray_pos}→{stage_pos} (attempt {retry_count + 1})")
+                    continue
+                else:
+                    operation_duration = time_module.time() - operation_start_time
+                    log_soak_test_operation(
+                        session_id, 'tray_to_stage_transfer', f"{tray_pos}→{stage_pos}", False,
+                        cycle_id=cycle_id, retry_count=retry_count,
+                        error_message=f"Stub not picked from {tray_pos}",
+                        duration_seconds=operation_duration
+                    )
+                    return False
+            
+            global_robot.moveto(*global_robot.intermediate_pos["ZHOME"])
+            
+            # Step 5: Transfer to rotator
+            print(f"Moving to rotator for orientation")
+            control_panel_rotator("faceDown")  # Home rotator
+            control_panel_gripper_home()      # Home gripper
+            
+            global_robot.moveto(*global_robot.equipment_pos["ROTATOR_0"])
+            global_robot.moveto(*global_robot.equipment_pos["ROTATOR_Z1"])
+            global_robot.speed = SPEED_VLOW
+            global_robot.moveto(*global_robot.equipment_pos["ROTATOR_ENGAGE"])
+            control_panel_vacuum("SEM", False)  # Release from needle
+            time_module.sleep(PAUSE_VAC)
+            global_robot.speed = SPEED_NORMAL
+            global_robot.moveto(*global_robot.intermediate_pos["ZHOME"])
+            
+            # Step 6: Rotate stub face up
+            control_panel_rotator("faceUp")
+            
+            # Step 7: Pick up with gripper
+            global_robot.moveto(*global_robot.equipment_pos["GRIPPER_ROTATOR_0"])
+            global_robot.moveto(*global_robot.equipment_pos["GRIPPER_ROTATOR_Z1"])
+            control_panel_gripper_close()  # Close gripper on stub
+            global_robot.speed = SPEED_VLOW
+            global_robot.moveto(*global_robot.equipment_pos["GRIPPER_ROTATOR_DISENGAGE"])
+            global_robot.speed = SPEED_NORMAL
+            global_robot.moveto(*global_robot.intermediate_pos["ZHOME"])
+            
+            # Step 8: Reset rotator
+            control_panel_rotator("faceDown")
+            
+            # Step 9: Move to stage and place stub
+            print(f"Placing stub at {stage_pos}")
+            
+            # Get the lid position for this stage position
+            stage_lid_value = int(global_robot.phenom_stub_pos[stage_pos][4])
+            control_panel_sem_stage_partial_open(stage_lid_value)
+            
+            global_robot.moveto(*global_robot.phenom_stub_pos[stage_pos])
+            global_robot.moveto(*global_robot.phenom_stub_pos["PH_Z1"])
+            global_robot.speed = SPEED_LOW
+            global_robot.moveto(*global_robot.phenom_stub_pos["PH_Z2"])
+            global_robot.speed = SPEED_VLOW
+            global_robot.moveto(*global_robot.phenom_stub_pos["PH_Z3"])
+            
+            # Release stub from gripper
+            control_panel_gripper_release()
+            global_robot.moveto(*global_robot.phenom_stub_pos["PH_Z4"])
+            
+            # Press stub down gently
+            control_panel_gripper_press()
+            global_robot.moveto(*global_robot.phenom_stub_pos["PH_Z5"])
+            
+            # Open gripper and withdraw
+            control_panel_gripper_home()
+            global_robot.speed = SPEED_NORMAL
+            global_robot.moveto(*global_robot.intermediate_pos["ZHOME"])
+            
+            # Step 10: Close stage lid
+            control_panel_sem_stage_close()
+            
+            # Step 11: Return to home position
+            global_robot.moveto(x=global_robot.intermediate_pos["HOME"][0])
+            global_robot.moveto(y=global_robot.intermediate_pos["HOME"][1])
+            
+            # Log successful operation
+            operation_duration = time_module.time() - operation_start_time
+            log_soak_test_operation(
+                session_id, 'tray_to_stage_transfer', f"{tray_pos}→{stage_pos}", True,
+                cycle_id=cycle_id, retry_count=retry_count,
+                duration_seconds=operation_duration,
+                operation_data={'stage_lid_value': stage_lid_value}
+            )
+            
+            print(f"Successfully transferred stub {tray_pos}→{stage_pos}")
+            return True
+            
+        except Exception as e:
+            # Handle any errors during the transfer
+            error_msg = f"Transfer {tray_pos}→{stage_pos} failed: {str(e)}"
+            print(error_msg)
+            
+            # Ensure cleanup in case of error
+            try:
+                control_panel_vacuum("SEM", False)
+                control_panel_gripper_home()
+                control_panel_rotator("faceDown")
+                control_panel_sem_stage_close()
+                if global_robot:
+                    global_robot.speed = SPEED_NORMAL
+                    global_robot.moveto(*global_robot.intermediate_pos["ZHOME"])
+            except Exception as cleanup_error:
+                print(f"Error during cleanup: {cleanup_error}")
+            
+            # Log the error
+            log_soak_test_error(
+                session_id, determine_soak_error_category(str(e), 'tray_to_stage_transfer'),
+                error_msg, position=f"{tray_pos}→{stage_pos}", component='robot'
+            )
+            
+            # Decide whether to retry
+            if failure_handling == 'retry' and retry_count < max_retries:
+                retry_count += 1
+                print(f"Retrying {tray_pos}→{stage_pos} (attempt {retry_count + 1})")
+                time_module.sleep(2)  # Longer pause before retry for complex operation
+                continue
+            else:
+                # Log failed operation
+                operation_duration = time_module.time() - operation_start_time
+                log_soak_test_operation(
+                    session_id, 'tray_to_stage_transfer', f"{tray_pos}→{stage_pos}", False,
+                    cycle_id=cycle_id, retry_count=retry_count,
+                    error_message=error_msg, duration_seconds=operation_duration
+                )
+                return False
+    
+    # If we exit the while loop, all retries failed
+    return False
+
+#endregion
+
+#region - Communication stress soak test functions
+
+def soak_test_communication_stress(session_id, config):
+    """
+    Main Communication Stress soak test function.
+    Tests PLC and/or robot communication at various speeds.
+    
+    Args:
+        session_id (int): Database session ID
+        config (dict): Test configuration
+    """
+    global soak_test_in_progress, current_soak_test_session
+    
+    # Configuration
+    test_type = config.get('test_type', 'both')  # 'plc', 'robot', or 'both'
+    target_cycles = config.get('cycles', 3)
+    failure_threshold = config.get('failure_threshold', 10)  # Percentage
+    commands_per_speed = 25
+    
+    # Speed intervals (seconds between commands)
+    speed_intervals = [1.0, 0.8, 0.6, 0.4, 0.2, 0.1]
+    
+    try:
+        print(f"Starting Communication Stress test - Session {session_id}")
+        
+        # Initialize components based on test type
+        robot_ready = False
+        plc_ready = False
+        
+        if test_type in ['robot', 'both']:
+            # Test robot connectivity
+            for attempt in range(3):
+                if soak_test_stop_event.is_set():
+                    raise Exception("Test stopped by user during robot initialization")
+                    
+                try:
+                    success, result = c3dp_test_connectivity(complete_test=False)
+                    if success:
+                        robot_ready = True
+                        log_soak_test_operation(
+                            session_id, 'robot_init', None, True,
+                            operation_data={'result': result}
+                        )
+                        break
+                    else:
+                        raise Exception(f"Robot initialization failed: {result}")
+                        
+                except Exception as e:
+                    error_msg = f"Robot initialization attempt {attempt + 1} failed: {str(e)}"
+                    print(error_msg)
+                    
+                    log_soak_test_error(
+                        session_id, 'Robot_Communication', error_msg,
+                        component='robot', recovery_action=f"Retry {attempt + 1}/3"
+                    )
+                    
+                    if attempt >= 2:
+                        raise Exception(f"Failed to initialize robot after 3 attempts")
+                    
+                    time_module.sleep(2)
+        
+        if test_type in ['plc', 'both']:
+            # Test PLC connectivity
+            for attempt in range(3):
+                if soak_test_stop_event.is_set():
+                    raise Exception("Test stopped by user during PLC initialization")
+                    
+                try:
+                    result = control_panel_get_macstat()
+                    if "STANDBY" in result or "SHUTDWN" in result or "MACSTAT" in result:
+                        plc_ready = True
+                        log_soak_test_operation(
+                            session_id, 'plc_init', None, True,
+                            operation_data={'result': result}
+                        )
+                        break
+                    else:
+                        raise Exception(f"PLC initialization failed: {result}")
+                        
+                except Exception as e:
+                    error_msg = f"PLC initialization attempt {attempt + 1} failed: {str(e)}"
+                    print(error_msg)
+                    
+                    log_soak_test_error(
+                        session_id, 'PLC_Communication', error_msg,
+                        component='PLC', recovery_action=f"Retry {attempt + 1}/3"
+                    )
+                    
+                    if attempt >= 2:
+                        raise Exception(f"Failed to initialize PLC after 3 attempts")
+                    
+                    time_module.sleep(2)
+        
+        # Main test loop
+        total_operations = 0
+        successful_operations = 0
+        failed_operations = 0
+        
+        for cycle in range(1, target_cycles + 1):
+            if soak_test_stop_event.is_set():
+                break
+                
+            print(f"Starting cycle {cycle}/{target_cycles}")
+            
+            # Create cycle record
+            cycle_id = create_soak_test_cycle(session_id, cycle)
+            cycle_start_time = time_module.time()
+            
+            # Update session status
+            update_soak_test_session(session_id, {
+                'current_cycle': cycle,
+                'current_step': f'Starting cycle {cycle}'
+            })
+            
+            cycle_successful = 0
+            cycle_failed = 0
+            
+            # Test each speed interval
+            for speed_interval in speed_intervals:
+                if soak_test_stop_event.is_set():
+                    break
+                    
+                print(f"Testing {speed_interval}s interval (Cycle {cycle})")
+                
+                # Update current step
+                update_soak_test_session(session_id, {
+                    'current_step': f'Testing {speed_interval}s interval'
+                })
+                
+                # Test this speed interval
+                interval_success, interval_stats = test_communication_interval(
+                    session_id, cycle_id, speed_interval, commands_per_speed,
+                    test_type, failure_threshold
+                )
+                
+                total_operations += interval_stats['total']
+                successful_operations += interval_stats['successful']
+                failed_operations += interval_stats['failed']
+                
+                if interval_success:
+                    cycle_successful += 1
+                else:
+                    cycle_failed += 1
+                    
+                    # Check if we should stop due to high failure rate
+                    failure_rate = (interval_stats['failed'] / interval_stats['total']) * 100
+                    if failure_rate > failure_threshold:
+                        error_msg = f"Stopping speed progression - failure rate {failure_rate:.1f}% exceeds threshold {failure_threshold}%"
+                        print(error_msg)
+                        
+                        log_soak_test_error(
+                            session_id, 'Communication_Failure', error_msg,
+                            component='system', recovery_action='stop_speed_progression'
+                        )
+                        break
+                
+                # Update statistics after each interval
+                current_success_rate = (successful_operations / total_operations * 100) if total_operations > 0 else 0
+                update_soak_test_session(session_id, {
+                    'total_operations': total_operations,
+                    'successful_operations': successful_operations,
+                    'failed_operations': failed_operations,
+                    'current_success_rate': current_success_rate
+                })
+            
+            # Complete cycle
+            cycle_duration = time_module.time() - cycle_start_time
+            cycle_success_rate = (cycle_successful / len(speed_intervals) * 100) if len(speed_intervals) > 0 else 0
+            
+            # Update cycle record
+            if cycle_id:
+                with get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        UPDATE soak_test_cycles 
+                        SET end_time = ?, status = ?, total_positions = ?, 
+                            successful_positions = ?, failed_positions = ?, success_rate = ?
+                        WHERE id = ?
+                    """, (
+                        datetime.now(), 'completed', len(speed_intervals),
+                        cycle_successful, cycle_failed, cycle_success_rate, cycle_id
+                    ))
+                    conn.commit()
+            
+            print(f"Cycle {cycle} completed - Success rate: {cycle_success_rate:.1f}%")
+            
+            # Update session
+            update_soak_test_session(session_id, {
+                'completed_cycles': cycle,
+                'current_step': f'Completed cycle {cycle}'
+            })
+        
+        # Test completed successfully
+        final_success_rate = (successful_operations / total_operations * 100) if total_operations > 0 else 0
+        session_data = get_soak_test_session(session_id)
+        start_time = datetime.fromisoformat(session_data['start_time'])
+        total_duration = (datetime.now() - start_time).total_seconds() / 60
+        
+        update_soak_test_session(session_id, {
+            'status': 'completed',
+            'end_time': datetime.now(),
+            'final_success_rate': final_success_rate,
+            'duration_minutes': total_duration,
+            'current_step': 'Test completed successfully'
+        })
+        
+        print(f"Communication Stress test completed successfully - Final success rate: {final_success_rate:.1f}%")
+        
+    except Exception as e:
+        # Test failed
+        error_msg = f"Communication Stress test failed: {str(e)}"
+        print(error_msg)
+        
+        update_soak_test_session(session_id, {
+            'status': 'failed',
+            'end_time': datetime.now(),
+            'failure_reason': str(e),
+            'current_step': 'Test failed'
+        })
+        
+        log_soak_test_error(
+            session_id, determine_soak_error_category(str(e), 'test_execution'),
+            error_msg, component='system'
+        )
+    
+    finally:
+        # Cleanup
+        print("Cleaning up Communication Stress test")
+        
+        # Reset global flags
+        soak_test_in_progress = False
+        current_soak_test_session = None
+        soak_test_stop_event.clear()
+
+def test_communication_interval(session_id, cycle_id, interval, commands_per_speed, test_type, failure_threshold):
+    """
+    Test communication at a specific interval.
+    
+    Args:
+        session_id (int): Database session ID
+        cycle_id (int): Database cycle ID
+        interval (float): Time interval between commands
+        commands_per_speed (int): Number of commands to send
+        test_type (str): 'plc', 'robot', or 'both'
+        failure_threshold (float): Failure percentage threshold
+    
+    Returns:
+        tuple: (success, stats_dict)
+    """
+    stats = {'total': 0, 'successful': 0, 'failed': 0, 'timeouts': 0, 'avg_response_time': 0}
+    response_times = []
+    
+    try:
+        print(f"Testing {commands_per_speed} commands at {interval}s interval")
+        
+        for command_num in range(commands_per_speed):
+            if soak_test_stop_event.is_set():
+                break
+                
+            # Test PLC communication
+            if test_type in ['plc', 'both']:
+                plc_success, plc_time = test_single_plc_command(session_id, cycle_id, interval)
+                stats['total'] += 1
+                if plc_success:
+                    stats['successful'] += 1
+                    response_times.append(plc_time)
+                else:
+                    stats['failed'] += 1
+                    if plc_time == -1:  # Timeout
+                        stats['timeouts'] += 1
+            
+            # Test Robot communication
+            if test_type in ['robot', 'both']:
+                robot_success, robot_time = test_single_robot_command(session_id, cycle_id, interval)
+                stats['total'] += 1
+                if robot_success:
+                    stats['successful'] += 1
+                    response_times.append(robot_time)
+                else:
+                    stats['failed'] += 1
+                    if robot_time == -1:  # Timeout
+                        stats['timeouts'] += 1
+            
+            # Wait for the specified interval
+            time_module.sleep(interval)
+            
+            # Check failure rate periodically
+            if (command_num + 1) % 5 == 0:  # Check every 5 commands
+                current_failure_rate = (stats['failed'] / stats['total']) * 100
+                if current_failure_rate > failure_threshold:
+                    print(f"Early termination: failure rate {current_failure_rate:.1f}% exceeds threshold")
+                    break
+        
+        # Calculate statistics
+        if response_times:
+            stats['avg_response_time'] = sum(response_times) / len(response_times)
+        
+        success_rate = (stats['successful'] / stats['total'] * 100) if stats['total'] > 0 else 0
+        
+        # Log the interval result
+        log_soak_test_operation(
+            session_id, 'communication_interval', f"{interval}s", 
+            success_rate >= (100 - failure_threshold),
+            cycle_id=cycle_id,
+            operation_data={
+                'interval': interval,
+                'commands_sent': stats['total'],
+                'success_rate': success_rate,
+                'avg_response_time': stats['avg_response_time'],
+                'timeouts': stats['timeouts']
+            }
+        )
+        
+        # Return success if failure rate is below threshold
+        return success_rate >= (100 - failure_threshold), stats
+        
+    except Exception as e:
+        error_msg = f"Communication interval test failed: {str(e)}"
+        print(error_msg)
+        
+        log_soak_test_error(
+            session_id, determine_soak_error_category(str(e), 'communication_test'),
+            error_msg, component='system'
+        )
+        
+        return False, stats
+
+def test_single_plc_command(session_id, cycle_id, interval):
+    """Test a single PLC command and measure response time."""
+    start_time = time_module.time()
+    
+    try:
+        result = control_panel_get_macstat()
+        response_time = time_module.time() - start_time
+        
+        # Check if response is valid
+        if "MACSTAT" in result or "STANDBY" in result or "SHUTDWN" in result:
+            return True, response_time
+        else:
+            # Invalid response
+            log_soak_test_error(
+                session_id, 'PLC_Communication', 
+                f"Invalid PLC response: {result}",
+                component='PLC'
+            )
+            return False, response_time
+            
+    except Exception as e:
+        response_time = time_module.time() - start_time
+        
+        # Check if it's a timeout
+        if "timeout" in str(e).lower():
+            return False, -1  # Special value for timeout
+        else:
+            log_soak_test_error(
+                session_id, 'PLC_Communication',
+                f"PLC command failed: {str(e)}",
+                component='PLC'
+            )
+            return False, response_time
+
+def test_single_robot_command(session_id, cycle_id, interval):
+    """Test a single robot command and measure response time."""
+    global global_robot
+    
+    start_time = time_module.time()
+    
+    try:
+        if not global_robot:
+            raise Exception("Robot not initialized")
+        
+        # Send M114 command to get position
+        if global_robot.test_connection():
+            global_robot.get_current_position()
+            response_time = time_module.time() - start_time
+            
+            # Check if we got a valid position
+            if global_robot.has_been_homed:
+                return True, response_time
+            else:
+                log_soak_test_error(
+                    session_id, 'Robot_Communication',
+                    "Robot position not available",
+                    component='robot'
+                )
+                return False, response_time
+        else:
+            response_time = time_module.time() - start_time
+            log_soak_test_error(
+                session_id, 'Robot_Communication',
+                "Robot connection test failed",
+                component='robot'
+            )
+            return False, response_time
+            
+    except Exception as e:
+        response_time = time_module.time() - start_time
+        
+        # Check if it's a timeout
+        if "timeout" in str(e).lower():
+            return False, -1  # Special value for timeout
+        else:
+            log_soak_test_error(
+                session_id, 'Robot_Communication',
+                f"Robot command failed: {str(e)}",
+                component='robot'
+            )
+            return False, response_time
+
+#endregion
+
+#region - TEM Disk cycle soak test functions
+
+def soak_test_tem_cycling(session_id, config):
+    """
+    Main TEM Disk Cycling soak test function.
+    Tests bidirectional TEM disk operations with laser verification.
+    
+    Args:
+        session_id (int): Database session ID
+        config (dict): Test configuration
+    """
+    global soak_test_in_progress, current_soak_test_session
+    
+    # Define test mapping (TC -> TE bidirectional)
+    disk_pairs = [
+        ('TC1', 'TE1'), ('TC2', 'TE2'), ('TC3', 'TE3'), ('TC4', 'TE4'), ('TC5', 'TE5'),
+        ('TC6', 'TE6'), ('TC7', 'TE7'), ('TC8', 'TE8'), ('TC9', 'TE9'), ('TC10', 'TE10')
+    ]
+    
+    target_cycles = config.get('cycles', 2)
+    max_retries = config.get('max_retries', 3)
+    failure_handling = config.get('failure_handling', 'skip')
+    skip_laser = config.get('skip_laser', False)
+    
+    try:
+        print(f"Starting TEM Disk Cycling test - Session {session_id}")
+        
+        # Initialize robot
+        robot_ready = False
+        retry_count = 0
+        max_robot_retries = 3
+        
+        while not robot_ready and retry_count < max_robot_retries:
+            if soak_test_stop_event.is_set():
+                raise Exception("Test stopped by user during initialization")
+                
+            try:
+                success, result = c3dp_test_connectivity(complete_test=False)
+                if success:
+                    robot_ready = True
+                    log_soak_test_operation(
+                        session_id, 'robot_init', None, True, 
+                        operation_data={'result': result}
+                    )
+                else:
+                    raise Exception(f"Robot initialization failed: {result}")
+                    
+            except Exception as e:
+                retry_count += 1
+                error_msg = f"Robot initialization attempt {retry_count} failed: {str(e)}"
+                print(error_msg)
+                
+                log_soak_test_error(
+                    session_id, 'Robot_Communication', error_msg,
+                    component='robot', recovery_action=f"Retry {retry_count}/{max_robot_retries}"
+                )
+                
+                if retry_count >= max_robot_retries:
+                    raise Exception(f"Failed to initialize robot after {max_robot_retries} attempts")
+                
+                time_module.sleep(5)
+        
+        # Home the robot
+        if not soak_test_stop_event.is_set():
+            try:
+                device_step_zero()
+                log_soak_test_operation(session_id, 'robot_home', None, True)
+            except Exception as e:
+                error_msg = f"Robot homing failed: {str(e)}"
+                log_soak_test_error(session_id, 'Robot_Movement', error_msg, component='robot')
+                raise Exception(error_msg)
+        
+        # Main test loop
+        total_operations = 0
+        successful_operations = 0
+        failed_operations = 0
+        
+        for cycle in range(1, target_cycles + 1):
+            if soak_test_stop_event.is_set():
+                break
+                
+            print(f"Starting cycle {cycle}/{target_cycles}")
+            
+            # Create cycle record
+            cycle_id = create_soak_test_cycle(session_id, cycle)
+            cycle_start_time = time_module.time()
+            
+            # Update session status
+            update_soak_test_session(session_id, {
+                'current_cycle': cycle,
+                'current_step': f'Starting cycle {cycle}'
+            })
+            
+            cycle_successful = 0
+            cycle_failed = 0
+            
+            # Phase 1: Move all disks from TC to TE (clean to used)
+            print(f"Phase 1: Moving disks TC→TE (Cycle {cycle})")
+            update_soak_test_session(session_id, {
+                'current_step': f'Phase 1: TC→TE transfers'
+            })
+            
+            for origin, destination in disk_pairs:
+                if soak_test_stop_event.is_set():
+                    break
+                    
+                success = perform_tem_disk_transfer(
+                    session_id, cycle_id, origin, destination, 
+                    max_retries, failure_handling, skip_laser
+                )
+                
+                total_operations += 1
+                if success:
+                    successful_operations += 1
+                    cycle_successful += 1
+                else:
+                    failed_operations += 1
+                    cycle_failed += 1
+                    if failure_handling == 'stop':
+                        raise Exception(f"Test stopped due to failure at {origin}→{destination}")
+                
+                # Update statistics
+                current_success_rate = (successful_operations / total_operations * 100) if total_operations > 0 else 0
+                update_soak_test_session(session_id, {
+                    'total_operations': total_operations,
+                    'successful_operations': successful_operations,
+                    'failed_operations': failed_operations,
+                    'current_success_rate': current_success_rate,
+                    'current_position': f"{origin}→{destination}"
+                })
+            
+            # Short pause between phases
+            if not soak_test_stop_event.is_set():
+                time_module.sleep(2)
+            
+            # Phase 2: Move all disks from TE back to TC (used to clean)
+            print(f"Phase 2: Moving disks TE→TC (Cycle {cycle})")
+            update_soak_test_session(session_id, {
+                'current_step': f'Phase 2: TE→TC returns'
+            })
+            
+            for origin, destination in disk_pairs:
+                if soak_test_stop_event.is_set():
+                    break
+                    
+                # Reverse the direction for return trip
+                success = perform_tem_disk_transfer(
+                    session_id, cycle_id, destination, origin,  # TE→TC
+                    max_retries, failure_handling, skip_laser
+                )
+                
+                total_operations += 1
+                if success:
+                    successful_operations += 1
+                    cycle_successful += 1
+                else:
+                    failed_operations += 1
+                    cycle_failed += 1
+                    if failure_handling == 'stop':
+                        raise Exception(f"Test stopped due to failure at {destination}→{origin}")
+                
+                # Update statistics
+                current_success_rate = (successful_operations / total_operations * 100) if total_operations > 0 else 0
+                update_soak_test_session(session_id, {
+                    'total_operations': total_operations,
+                    'successful_operations': successful_operations,
+                    'failed_operations': failed_operations,
+                    'current_success_rate': current_success_rate,
+                    'current_position': f"{destination}→{origin}"
+                })
+            
+            # Complete cycle
+            cycle_duration = time_module.time() - cycle_start_time
+            total_positions_in_cycle = len(disk_pairs) * 2  # Both directions
+            cycle_success_rate = (cycle_successful / total_positions_in_cycle * 100) if total_positions_in_cycle > 0 else 0
+            
+            # Update cycle record
+            if cycle_id:
+                with get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        UPDATE soak_test_cycles 
+                        SET end_time = ?, status = ?, total_positions = ?, 
+                            successful_positions = ?, failed_positions = ?, success_rate = ?
+                        WHERE id = ?
+                    """, (
+                        datetime.now(), 'completed', total_positions_in_cycle,
+                        cycle_successful, cycle_failed, cycle_success_rate, cycle_id
+                    ))
+                    conn.commit()
+            
+            print(f"Cycle {cycle} completed - Success rate: {cycle_success_rate:.1f}%")
+            
+            # Update session
+            update_soak_test_session(session_id, {
+                'completed_cycles': cycle,
+                'current_step': f'Completed cycle {cycle}'
+            })
+        
+        # Test completed successfully
+        final_success_rate = (successful_operations / total_operations * 100) if total_operations > 0 else 0
+        session_data = get_soak_test_session(session_id)
+        start_time = datetime.fromisoformat(session_data['start_time'])
+        total_duration = (datetime.now() - start_time).total_seconds() / 60
+        
+        update_soak_test_session(session_id, {
+            'status': 'completed',
+            'end_time': datetime.now(),
+            'final_success_rate': final_success_rate,
+            'duration_minutes': total_duration,
+            'current_step': 'Test completed successfully'
+        })
+        
+        print(f"TEM Disk Cycling test completed successfully - Final success rate: {final_success_rate:.1f}%")
+        
+    except Exception as e:
+        # Test failed
+        error_msg = f"TEM Disk Cycling test failed: {str(e)}"
+        print(error_msg)
+        
+        update_soak_test_session(session_id, {
+            'status': 'failed',
+            'end_time': datetime.now(),
+            'failure_reason': str(e),
+            'current_step': 'Test failed'
+        })
+        
+        log_soak_test_error(
+            session_id, determine_soak_error_category(str(e), 'test_execution'),
+            error_msg, component='system'
+        )
+    
+    finally:
+        # Cleanup
+        print("Cleaning up TEM Disk Cycling test")
+        
+        try:
+            # Return robot to home position
+            device_step_final()
+        except Exception as e:
+            print(f"Error during cleanup: {e}")
+        
+        # Reset global flags
+        soak_test_in_progress = False
+        current_soak_test_session = None
+        soak_test_stop_event.clear()
+
+def perform_tem_disk_transfer(session_id, cycle_id, origin, destination, max_retries, failure_handling, skip_laser):
+    """
+    Perform a single TEM disk transfer operation.
+    
+    Args:
+        session_id (int): Database session ID
+        cycle_id (int): Database cycle ID
+        origin (str): Origin position (TC# or TE#)
+        destination (str): Destination position
+        max_retries (int): Maximum retry attempts
+        failure_handling (str): Failure handling strategy
+        skip_laser (bool): Whether to skip laser verification
+    
+    Returns:
+        bool: True if successful, False if failed
+    """
+    global global_robot
+    
+    retry_count = 0
+    
+    while retry_count <= max_retries:
+        try:
+            if not global_robot:
+                raise Exception("Robot not initialized")
+            
+            print(f"Transferring disk {origin}→{destination} (attempt {retry_count + 1})")
+            
+            operation_start_time = time_module.time()
+            
+            # Step 1: Move to standby position
+            global_robot.speed = SPEED_NORMAL
+            global_robot.moveto(*global_robot.intermediate_pos["ZHOME"])
+            
+            # Step 2: Determine if this is clean or used disk area
+            if origin.startswith('TC'):
+                # Moving from clean area (TC)
+                disk_positions = global_robot.clean_disk_pos
+                disk_z_positions = ['TCTRAY_Z1', 'TCTRAY_Z2', 'TCTRAY_Z3']
+            else:
+                # Moving from used area (TE)
+                disk_positions = global_robot.used_disk_pos
+                disk_z_positions = ['TETRAY_Z1', 'TETRAY_Z2', 'TETRAY_Z3']
+            
+            # Step 3: Open TEM grid holder and turn on vacuum
+            global_robot.moveto(x=disk_positions[origin][0])
+            control_panel_tem_grid_holder_open()
+            time_module.sleep(1.5)
+            control_panel_vacuum("TEM", True)
+            
+            # Step 4: Pick up disk
+            global_robot.moveto(*disk_positions[origin])
+            global_robot.moveto(*disk_positions[disk_z_positions[0]])
+            global_robot.speed = SPEED_LOW
+            global_robot.moveto(*disk_positions[disk_z_positions[1]])
+            global_robot.speed = SPEED_VLOW
+            global_robot.moveto(*disk_positions[disk_z_positions[2]])
+            global_robot.moveto(*disk_positions[disk_z_positions[1]])
+            global_robot.speed = SPEED_NORMAL
+            global_robot.moveto(*global_robot.intermediate_pos["ZHOME"])
+            
+            # Step 5: Laser verification (if enabled)
+            disk_picked = True
+            if not skip_laser:
+                print(f"Checking laser detection for {origin}")
+                global_robot.moveto(*global_robot.equipment_pos["LASER_TEM"])
+                global_robot.moveto(*global_robot.equipment_pos["LASER_TEM_Z1"])
+                
+                laser_result = control_panel_laser_status()
+                if laser_result != "LASER1":
+                    disk_picked = False
+                    print(f"Laser detection failed for {origin}")
+                    log_soak_test_error(
+                        session_id, 'Laser_Detection',
+                        f"Disk not detected at {origin} - Expected LASER1, got {laser_result}",
+                        position=origin, component='laser'
+                    )
+                
+                global_robot.moveto(*global_robot.intermediate_pos["ZHOME"])
+            
+            if not disk_picked:
+                # Turn off vacuum and retry or fail
+                control_panel_vacuum("TEM", False)
+                control_panel_tem_grid_holder_close()
+                
+                if failure_handling == 'retry' and retry_count < max_retries:
+                    retry_count += 1
+                    print(f"Retrying {origin}→{destination} (attempt {retry_count + 1})")
+                    continue
+                else:
+                    operation_duration = time_module.time() - operation_start_time
+                    log_soak_test_operation(
+                        session_id, 'disk_transfer', f"{origin}→{destination}", False,
+                        cycle_id=cycle_id, retry_count=retry_count,
+                        error_message=f"Disk not picked from {origin}",
+                        duration_seconds=operation_duration
+                    )
+                    return False
+            
+            # Step 6: Close grid holder
+            time_module.sleep(1)
+            control_panel_tem_grid_holder_close()
+            time_module.sleep(1)
+            
+            # Step 7: Move to destination area
+            if destination.startswith('TC'):
+                # Moving to clean area
+                dest_positions = global_robot.clean_disk_pos
+                dest_z_positions = ['TCTRAY_Z1', 'TCTRAY_Z2', 'TCTRAY_Z3']
+            else:
+                # Moving to used area
+                dest_positions = global_robot.used_disk_pos
+                dest_z_positions = ['TETRAY_Z1', 'TETRAY_Z2', 'TETRAY_Z3']
+            
+            # Step 8: Place disk at destination (separate X/Y movement to avoid contamination)
+            global_robot.moveto(x=dest_positions[destination][0])
+            control_panel_tem_grid_holder_open()
+            time_module.sleep(1)
+            global_robot.moveto(y=dest_positions[destination][1])
+            global_robot.moveto(*dest_positions[dest_z_positions[0]])
+            global_robot.speed = SPEED_LOW
+            global_robot.moveto(*dest_positions[dest_z_positions[1]])
+            global_robot.speed = SPEED_VLOW
+            global_robot.moveto(*dest_positions[dest_z_positions[2]])
+            
+            # Turn off vacuum to release disk
+            control_panel_vacuum("TEM", False)
+            time_module.sleep(PAUSE_VAC)
+            
+            global_robot.moveto(*dest_positions[dest_z_positions[1]])
+            global_robot.speed = SPEED_NORMAL
+            global_robot.moveto(*global_robot.intermediate_pos["ZHOME"])
+            time_module.sleep(1)
+            control_panel_tem_grid_holder_close()
+            time_module.sleep(1)
+            
+            # Step 9: Return to home position
+            global_robot.moveto(x=global_robot.intermediate_pos["HOME"][0])
+            global_robot.moveto(y=global_robot.intermediate_pos["HOME"][1])
+            
+            # Log successful operation
+            operation_duration = time_module.time() - operation_start_time
+            log_soak_test_operation(
+                session_id, 'disk_transfer', f"{origin}→{destination}", True,
+                cycle_id=cycle_id, retry_count=retry_count,
+                duration_seconds=operation_duration,
+                operation_data={'laser_verification': not skip_laser}
+            )
+            
+            print(f"Successfully transferred disk {origin}→{destination}")
+            return True
+            
+        except Exception as e:
+            # Handle any errors during the transfer
+            error_msg = f"Disk transfer {origin}→{destination} failed: {str(e)}"
+            print(error_msg)
+            
+            # Ensure cleanup in case of error
+            try:
+                control_panel_vacuum("TEM", False)
+                control_panel_tem_grid_holder_close()
+                if global_robot:
+                    global_robot.speed = SPEED_NORMAL
+                    global_robot.moveto(*global_robot.intermediate_pos["ZHOME"])
+            except Exception as cleanup_error:
+                print(f"Error during cleanup: {cleanup_error}")
+            
+            # Log the error
+            log_soak_test_error(
+                session_id, determine_soak_error_category(str(e), 'disk_transfer'),
+                error_msg, position=f"{origin}→{destination}", component='robot'
+            )
+            
+            # Decide whether to retry
+            if failure_handling == 'retry' and retry_count < max_retries:
+                retry_count += 1
+                print(f"Retrying {origin}→{destination} (attempt {retry_count + 1})")
+                time_module.sleep(1)  # Brief pause before retry
+                continue
+            else:
+                # Log failed operation
+                operation_duration = time_module.time() - operation_start_time
+                log_soak_test_operation(
+                    session_id, 'disk_transfer', f"{origin}→{destination}", False,
+                    cycle_id=cycle_id, retry_count=retry_count,
+                    error_message=error_msg, duration_seconds=operation_duration
+                )
+                return False
+    
+    # If we exit the while loop, all retries failed
+    return False
 
 #endregion
 
@@ -2504,24 +3760,724 @@ def stop_sem_pick_place_test():
             'message': f'Error stopping test: {str(e)}'
         })
 
-# Add similar routes for other test types (placeholder stubs)
-@app.route('/soak_tests/sem_to_stage')
-def sem_to_stage_test_page():
-    """SEM to Stage transfer soak test page."""
-    # TODO: Implement similar to sem_pick_place
-    return "<h1>SEM to Stage Transfer Test</h1><p>Coming soon...</p>"
+@app.route('/soak_tests/communication')
+def communication_test_page():
+    """Communication Stress test page with database integration."""
+    try:
+        # Get current test session from database
+        current_session = get_current_soak_test_session()
+        test_session = None
+        
+        if (current_session and 
+            current_session.get('test_type') == 'communication'):
+            
+            # Enhance session data with computed fields
+            test_session = current_session.copy()
+            
+            # Calculate elapsed time
+            if test_session.get('start_time'):
+                start_time = datetime.fromisoformat(test_session['start_time'])
+                elapsed = datetime.now() - start_time
+                test_session['elapsed_time_minutes'] = elapsed.total_seconds() / 60
+            
+            # Calculate estimated completion
+            if (test_session.get('current_cycle') and 
+                test_session.get('target_cycles') and
+                test_session.get('elapsed_time_minutes')):
+                
+                progress_ratio = test_session['current_cycle'] / test_session['target_cycles']
+                if progress_ratio > 0:
+                    total_estimated_minutes = test_session['elapsed_time_minutes'] / progress_ratio
+                    remaining_minutes = total_estimated_minutes - test_session['elapsed_time_minutes']
+                    completion_time = datetime.now() + timedelta(minutes=remaining_minutes)
+                    test_session['estimated_completion'] = completion_time.strftime('%H:%M')
+            
+            # Parse test parameters for display
+            if test_session.get('test_parameters'):
+                try:
+                    params = json.loads(test_session['test_parameters'])
+                    test_session['test_type'] = params.get('test_type', 'both')
+                    test_session['failure_threshold'] = params.get('failure_threshold', 10)
+                except:
+                    pass
+        
+        # Get recent errors for this test session
+        recent_errors = []
+        if test_session:
+            recent_errors = get_soak_test_errors_for_session(test_session['id'], limit=10)
+        
+        return render_template('soak_tests/communication.html',
+                             test_session=test_session,
+                             recent_errors=recent_errors)
+                             
+    except Exception as e:
+        print(f"Error loading Communication test page: {e}")
+        return render_template('soak_tests/communication.html',
+                             test_session=None,
+                             recent_errors=[],
+                             error_message=str(e))
+
+@app.route('/soak_tests/communication/start', methods=['POST'])
+def start_communication_test():
+    """Start a new Communication Stress test with database integration."""
+    global soak_test_in_progress, current_soak_test_session, current_soak_test_thread
+    
+    try:
+        # Check if another test is running
+        if soak_test_in_progress or get_current_soak_test_session():
+            return jsonify({
+                'success': False,
+                'message': 'Another soak test is currently running. Please wait for it to complete.'
+            })
+        
+        # Get and validate configuration
+        config = request.json
+        cycles = int(config.get('cycles', 3))
+        failure_threshold = int(config.get('failure_threshold', 10))
+        test_type = config.get('test_type', 'both')
+        
+        # Validation
+        if cycles < 1 or cycles > 10:
+            return jsonify({
+                'success': False,
+                'message': 'Number of cycles must be between 1 and 10.'
+            })
+        
+        if failure_threshold < 5 or failure_threshold > 50:
+            return jsonify({
+                'success': False,
+                'message': 'Failure threshold must be between 5% and 50%.'
+            })
+        
+        if test_type not in ['plc', 'robot', 'both']:
+            return jsonify({
+                'success': False,
+                'message': 'Invalid test type.'
+            })
+        
+        # Create database session
+        session_id = create_soak_test_session('communication', config)
+        if not session_id:
+            return jsonify({
+                'success': False,
+                'message': 'Failed to create test session in database.'
+            })
+        
+        # Set global flags
+        soak_test_in_progress = True
+        soak_test_stop_event.clear()
+        
+        # Start test in background thread
+        current_soak_test_thread = threading.Thread(
+            target=soak_test_communication_stress,
+            args=(session_id, config),
+            daemon=True
+        )
+        current_soak_test_thread.start()
+        
+        print(f"Started Communication Stress test - Session ID: {session_id}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Test started successfully',
+            'session_id': session_id
+        })
+        
+    except Exception as e:
+        # Reset flags on error
+        soak_test_in_progress = False
+        print(f"Error starting Communication test: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Error starting test: {str(e)}'
+        })
+
+@app.route('/soak_tests/communication/pause', methods=['POST'])
+def pause_communication_test():
+    """Pause the current Communication Stress test."""
+    try:
+        current_session = get_current_soak_test_session()
+        
+        if (not current_session or 
+            current_session.get('test_type') != 'communication' or
+            current_session.get('status') != 'running'):
+            return jsonify({
+                'success': False,
+                'message': 'No running Communication test found.'
+            })
+        
+        # Update database
+        update_soak_test_session(current_session['id'], {
+            'status': 'paused',
+            'current_step': 'Test paused by user'
+        })
+        
+        print("Communication test paused")
+        return jsonify({
+            'success': True,
+            'message': 'Test paused successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error pausing Communication test: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Error pausing test: {str(e)}'
+        })
+
+@app.route('/soak_tests/communication/resume', methods=['POST'])
+def resume_communication_test():
+    """Resume the paused Communication Stress test."""
+    try:
+        current_session = get_current_soak_test_session()
+        
+        if (not current_session or 
+            current_session.get('test_type') != 'communication' or
+            current_session.get('status') != 'paused'):
+            return jsonify({
+                'success': False,
+                'message': 'No paused Communication test found.'
+            })
+        
+        # Update database
+        update_soak_test_session(current_session['id'], {
+            'status': 'running',
+            'current_step': 'Test resumed by user'
+        })
+        
+        print("Communication test resumed")
+        return jsonify({
+            'success': True,
+            'message': 'Test resumed successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error resuming Communication test: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Error resuming test: {str(e)}'
+        })
+
+@app.route('/soak_tests/communication/stop', methods=['POST'])
+def stop_communication_test():
+    """Stop the current Communication Stress test."""
+    global soak_test_in_progress, current_soak_test_session
+    
+    try:
+        current_session = get_current_soak_test_session()
+        
+        if (not current_session or 
+            current_session.get('test_type') != 'communication'):
+            return jsonify({
+                'success': False,
+                'message': 'No Communication test found.'
+            })
+        
+        # Signal the test thread to stop
+        soak_test_stop_event.set()
+        
+        # Update database
+        update_soak_test_session(current_session['id'], {
+            'status': 'stopped',
+            'end_time': datetime.now(),
+            'current_step': 'Test stopped by user',
+            'failure_reason': 'User requested stop'
+        })
+        
+        # Reset global flags
+        soak_test_in_progress = False
+        current_soak_test_session = None
+        
+        print("Communication test stopped")
+        return jsonify({
+            'success': True,
+            'message': 'Test stopped successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error stopping Communication test: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Error stopping test: {str(e)}'
+        })
 
 @app.route('/soak_tests/tem_cycling')
 def tem_cycling_test_page():
-    """TEM Disk Cycling soak test page."""
-    # TODO: Implement similar to sem_pick_place
-    return "<h1>TEM Disk Cycling Test</h1><p>Coming soon...</p>"
+    """TEM Disk Cycling soak test page with database integration."""
+    try:
+        # Get current test session from database
+        current_session = get_current_soak_test_session()
+        test_session = None
+        
+        if (current_session and 
+            current_session.get('test_type') == 'tem_cycling'):
+            
+            # Enhance session data with computed fields
+            test_session = current_session.copy()
+            
+            # Calculate elapsed time
+            if test_session.get('start_time'):
+                start_time = datetime.fromisoformat(test_session['start_time'])
+                elapsed = datetime.now() - start_time
+                test_session['elapsed_time_minutes'] = elapsed.total_seconds() / 60
+            
+            # Calculate estimated completion
+            if (test_session.get('current_cycle') and 
+                test_session.get('target_cycles') and
+                test_session.get('elapsed_time_minutes')):
+                
+                progress_ratio = test_session['current_cycle'] / test_session['target_cycles']
+                if progress_ratio > 0:
+                    total_estimated_minutes = test_session['elapsed_time_minutes'] / progress_ratio
+                    remaining_minutes = total_estimated_minutes - test_session['elapsed_time_minutes']
+                    completion_time = datetime.now() + timedelta(minutes=remaining_minutes)
+                    test_session['estimated_completion'] = completion_time.strftime('%H:%M')
+            
+            # Parse test parameters for display
+            if test_session.get('test_parameters'):
+                try:
+                    params = json.loads(test_session['test_parameters'])
+                    test_session['skip_laser'] = params.get('skip_laser', False)
+                    test_session['failure_handling'] = params.get('failure_handling', 'skip')
+                    test_session['max_retries'] = params.get('max_retries', 3)
+                except:
+                    pass
+        
+        # Get recent errors for this test session
+        recent_errors = []
+        if test_session:
+            recent_errors = get_soak_test_errors_for_session(test_session['id'], limit=10)
+        
+        return render_template('soak_tests/tem_cycling.html',
+                             test_session=test_session,
+                             recent_errors=recent_errors)
+                             
+    except Exception as e:
+        print(f"Error loading TEM cycling test page: {e}")
+        return render_template('soak_tests/tem_cycling.html',
+                             test_session=None,
+                             recent_errors=[],
+                             error_message=str(e))
 
-@app.route('/soak_tests/communication')
-def communication_test_page():
-    """Communication stress test page."""
-    # TODO: Implement similar to sem_pick_place
-    return "<h1>Communication Stress Test</h1><p>Coming soon...</p>"
+@app.route('/soak_tests/tem_cycling/start', methods=['POST'])
+def start_tem_cycling_test():
+    """Start a new TEM Disk Cycling soak test with database integration."""
+    global soak_test_in_progress, current_soak_test_session, current_soak_test_thread
+    
+    try:
+        # Check if another test is running
+        if soak_test_in_progress or get_current_soak_test_session():
+            return jsonify({
+                'success': False,
+                'message': 'Another soak test is currently running. Please wait for it to complete.'
+            })
+        
+        # Get and validate configuration
+        config = request.json
+        cycles = int(config.get('cycles', 2))
+        max_retries = int(config.get('max_retries', 3))
+        failure_handling = config.get('failure_handling', 'skip')
+        skip_laser = config.get('skip_laser', False)
+        
+        # Validation
+        if cycles < 1 or cycles > 20:
+            return jsonify({
+                'success': False,
+                'message': 'Number of cycles must be between 1 and 20.'
+            })
+        
+        if max_retries < 1 or max_retries > 10:
+            return jsonify({
+                'success': False,
+                'message': 'Max retries must be between 1 and 10.'
+            })
+        
+        if failure_handling not in ['skip', 'retry', 'stop']:
+            return jsonify({
+                'success': False,
+                'message': 'Invalid failure handling option.'
+            })
+        
+        # Create database session
+        session_id = create_soak_test_session('tem_cycling', config)
+        if not session_id:
+            return jsonify({
+                'success': False,
+                'message': 'Failed to create test session in database.'
+            })
+        
+        # Set global flags
+        soak_test_in_progress = True
+        soak_test_stop_event.clear()
+        
+        # Start test in background thread
+        current_soak_test_thread = threading.Thread(
+            target=soak_test_tem_cycling,
+            args=(session_id, config),
+            daemon=True
+        )
+        current_soak_test_thread.start()
+        
+        print(f"Started TEM Disk Cycling test - Session ID: {session_id}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Test started successfully',
+            'session_id': session_id
+        })
+        
+    except Exception as e:
+        # Reset flags on error
+        soak_test_in_progress = False
+        print(f"Error starting TEM cycling test: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Error starting test: {str(e)}'
+        })
+
+@app.route('/soak_tests/tem_cycling/pause', methods=['POST'])
+def pause_tem_cycling_test():
+    """Pause the current TEM Disk Cycling test."""
+    try:
+        current_session = get_current_soak_test_session()
+        
+        if (not current_session or 
+            current_session.get('test_type') != 'tem_cycling' or
+            current_session.get('status') != 'running'):
+            return jsonify({
+                'success': False,
+                'message': 'No running TEM Disk Cycling test found.'
+            })
+        
+        # Update database
+        update_soak_test_session(current_session['id'], {
+            'status': 'paused',
+            'current_step': 'Test paused by user'
+        })
+        
+        print("TEM Disk Cycling test paused")
+        return jsonify({
+            'success': True,
+            'message': 'Test paused successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error pausing TEM cycling test: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Error pausing test: {str(e)}'
+        })
+
+@app.route('/soak_tests/tem_cycling/resume', methods=['POST'])
+def resume_tem_cycling_test():
+    """Resume the paused TEM Disk Cycling test."""
+    try:
+        current_session = get_current_soak_test_session()
+        
+        if (not current_session or 
+            current_session.get('test_type') != 'tem_cycling' or
+            current_session.get('status') != 'paused'):
+            return jsonify({
+                'success': False,
+                'message': 'No paused TEM Disk Cycling test found.'
+            })
+        
+        # Update database
+        update_soak_test_session(current_session['id'], {
+            'status': 'running',
+            'current_step': 'Test resumed by user'
+        })
+        
+        print("TEM Disk Cycling test resumed")
+        return jsonify({
+            'success': True,
+            'message': 'Test resumed successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error resuming TEM cycling test: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Error resuming test: {str(e)}'
+        })
+
+@app.route('/soak_tests/tem_cycling/stop', methods=['POST'])
+def stop_tem_cycling_test():
+    """Stop the current TEM Disk Cycling test."""
+    global soak_test_in_progress, current_soak_test_session
+    
+    try:
+        current_session = get_current_soak_test_session()
+        
+        if (not current_session or 
+            current_session.get('test_type') != 'tem_cycling'):
+            return jsonify({
+                'success': False,
+                'message': 'No TEM Disk Cycling test found.'
+            })
+        
+        # Signal the test thread to stop
+        soak_test_stop_event.set()
+        
+        # Update database
+        update_soak_test_session(current_session['id'], {
+            'status': 'stopped',
+            'end_time': datetime.now(),
+            'current_step': 'Test stopped by user',
+            'failure_reason': 'User requested stop'
+        })
+        
+        # Reset global flags
+        soak_test_in_progress = False
+        current_soak_test_session = None
+        
+        print("TEM Disk Cycling test stopped")
+        return jsonify({
+            'success': True,
+            'message': 'Test stopped successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error stopping TEM cycling test: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Error stopping test: {str(e)}'
+        })
+
+@app.route('/soak_tests/sem_to_stage')
+def sem_to_stage_test_page():
+    """SEM to Stage Transfer soak test page with database integration."""
+    try:
+        # Get current test session from database
+        current_session = get_current_soak_test_session()
+        test_session = None
+        
+        if (current_session and 
+            current_session.get('test_type') == 'sem_to_stage'):
+            
+            # Enhance session data with computed fields
+            test_session = current_session.copy()
+            
+            # Calculate elapsed time
+            if test_session.get('start_time'):
+                start_time = datetime.fromisoformat(test_session['start_time'])
+                elapsed = datetime.now() - start_time
+                test_session['elapsed_time_minutes'] = elapsed.total_seconds() / 60
+            
+            # Calculate estimated completion based on operations completed
+            total_transfers = 15  # Fixed number of transfers
+            if (test_session.get('total_operations') and 
+                test_session.get('elapsed_time_minutes') and
+                test_session['total_operations'] > 0):
+                
+                progress_ratio = test_session['total_operations'] / total_transfers
+                if progress_ratio > 0:
+                    total_estimated_minutes = test_session['elapsed_time_minutes'] / progress_ratio
+                    remaining_minutes = total_estimated_minutes - test_session['elapsed_time_minutes']
+                    completion_time = datetime.now() + timedelta(minutes=remaining_minutes)
+                    test_session['estimated_completion'] = completion_time.strftime('%H:%M')
+            
+            # Parse test parameters for display
+            if test_session.get('test_parameters'):
+                try:
+                    params = json.loads(test_session['test_parameters'])
+                    test_session['failure_handling'] = params.get('failure_handling', 'skip')
+                    test_session['max_retries'] = params.get('max_retries', 3)
+                except:
+                    pass
+        
+        # Get recent errors for this test session
+        recent_errors = []
+        if test_session:
+            recent_errors = get_soak_test_errors_for_session(test_session['id'], limit=10)
+        
+        return render_template('soak_tests/sem_to_stage.html',
+                             test_session=test_session,
+                             recent_errors=recent_errors)
+                             
+    except Exception as e:
+        print(f"Error loading SEM to Stage test page: {e}")
+        return render_template('soak_tests/sem_to_stage.html',
+                             test_session=None,
+                             recent_errors=[],
+                             error_message=str(e))
+
+@app.route('/soak_tests/sem_to_stage/start', methods=['POST'])
+def start_sem_to_stage_test():
+    """Start a new SEM to Stage Transfer soak test with database integration."""
+    global soak_test_in_progress, current_soak_test_session, current_soak_test_thread
+    
+    try:
+        # Check if another test is running
+        if soak_test_in_progress or get_current_soak_test_session():
+            return jsonify({
+                'success': False,
+                'message': 'Another soak test is currently running. Please wait for it to complete.'
+            })
+        
+        # Get and validate configuration
+        config = request.json
+        max_retries = int(config.get('max_retries', 3))
+        failure_handling = config.get('failure_handling', 'skip')
+        
+        # Validation
+        if max_retries < 1 or max_retries > 10:
+            return jsonify({
+                'success': False,
+                'message': 'Max retries must be between 1 and 10.'
+            })
+        
+        if failure_handling not in ['skip', 'retry', 'stop']:
+            return jsonify({
+                'success': False,
+                'message': 'Invalid failure handling option.'
+            })
+        
+        # Create database session
+        session_id = create_soak_test_session('sem_to_stage', config)
+        if not session_id:
+            return jsonify({
+                'success': False,
+                'message': 'Failed to create test session in database.'
+            })
+        
+        # Set global flags
+        soak_test_in_progress = True
+        soak_test_stop_event.clear()
+        
+        # Start test in background thread
+        current_soak_test_thread = threading.Thread(
+            target=soak_test_sem_to_stage,
+            args=(session_id, config),
+            daemon=True
+        )
+        current_soak_test_thread.start()
+        
+        print(f"Started SEM to Stage Transfer test - Session ID: {session_id}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Test started successfully',
+            'session_id': session_id
+        })
+        
+    except Exception as e:
+        # Reset flags on error
+        soak_test_in_progress = False
+        print(f"Error starting SEM to Stage test: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Error starting test: {str(e)}'
+        })
+
+@app.route('/soak_tests/sem_to_stage/pause', methods=['POST'])
+def pause_sem_to_stage_test():
+    """Pause the current SEM to Stage Transfer test."""
+    try:
+        current_session = get_current_soak_test_session()
+        
+        if (not current_session or 
+            current_session.get('test_type') != 'sem_to_stage' or
+            current_session.get('status') != 'running'):
+            return jsonify({
+                'success': False,
+                'message': 'No running SEM to Stage Transfer test found.'
+            })
+        
+        # Update database
+        update_soak_test_session(current_session['id'], {
+            'status': 'paused',
+            'current_step': 'Test paused by user'
+        })
+        
+        print("SEM to Stage Transfer test paused")
+        return jsonify({
+            'success': True,
+            'message': 'Test paused successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error pausing SEM to Stage test: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Error pausing test: {str(e)}'
+        })
+
+@app.route('/soak_tests/sem_to_stage/resume', methods=['POST'])
+def resume_sem_to_stage_test():
+    """Resume the paused SEM to Stage Transfer test."""
+    try:
+        current_session = get_current_soak_test_session()
+        
+        if (not current_session or 
+            current_session.get('test_type') != 'sem_to_stage' or
+            current_session.get('status') != 'paused'):
+            return jsonify({
+                'success': False,
+                'message': 'No paused SEM to Stage Transfer test found.'
+            })
+        
+        # Update database
+        update_soak_test_session(current_session['id'], {
+            'status': 'running',
+            'current_step': 'Test resumed by user'
+        })
+        
+        print("SEM to Stage Transfer test resumed")
+        return jsonify({
+            'success': True,
+            'message': 'Test resumed successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error resuming SEM to Stage test: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Error resuming test: {str(e)}'
+        })
+
+@app.route('/soak_tests/sem_to_stage/stop', methods=['POST'])
+def stop_sem_to_stage_test():
+    """Stop the current SEM to Stage Transfer test."""
+    global soak_test_in_progress, current_soak_test_session
+    
+    try:
+        current_session = get_current_soak_test_session()
+        
+        if (not current_session or 
+            current_session.get('test_type') != 'sem_to_stage'):
+            return jsonify({
+                'success': False,
+                'message': 'No SEM to Stage Transfer test found.'
+            })
+        
+        # Signal the test thread to stop
+        soak_test_stop_event.set()
+        
+        # Update database
+        update_soak_test_session(current_session['id'], {
+            'status': 'stopped',
+            'end_time': datetime.now(),
+            'current_step': 'Test stopped by user',
+            'failure_reason': 'User requested stop'
+        })
+        
+        # Reset global flags
+        soak_test_in_progress = False
+        current_soak_test_session = None
+        
+        print("SEM to Stage Transfer test stopped")
+        return jsonify({
+            'success': True,
+            'message': 'Test stopped successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error stopping SEM to Stage test: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Error stopping test: {str(e)}'
+        })
 
 #endregion
 
