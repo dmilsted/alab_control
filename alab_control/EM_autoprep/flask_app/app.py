@@ -8,7 +8,8 @@ import subprocess
 import csv
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
+import json
 import time as time_module  # Import as time_module to avoid conflict with the 'time' variable
 from database import (
     init_database, 
@@ -21,7 +22,20 @@ from database import (
     get_process_counts_by_time_period,
     get_error_categories_summary,
     get_performance_metrics,
-    get_component_reliability
+    get_component_reliability,
+    get_db_connection,
+    init_soak_test_database,
+    create_soak_test_session,
+    update_soak_test_session,
+    get_soak_test_session,
+    get_current_soak_test_session,
+    create_soak_test_cycle,
+    log_soak_test_operation,
+    log_soak_test_error,
+    get_soak_test_statistics,
+    get_recent_soak_tests,
+    get_soak_test_errors_for_session,
+    determine_soak_error_category
 )
 
 app = Flask(__name__)
@@ -82,12 +96,15 @@ stubs_tray_filename = 'stubs_tray.csv'
 current_process_runs = {}
 soak_test_in_progress = False
 current_soak_test_session = None
+current_soak_test_thread = None
+soak_test_stop_event = threading.Event()
 
 def initialize_app():
     """Initialize the application including database setup."""
     try:
         print("Initializing EM Autoprep application...")
         init_database()
+        init_soak_test_database()
         print("Application initialization completed successfully")
     except Exception as e:
         print(f"Error during application initialization: {e}")
@@ -1574,6 +1591,418 @@ def enhanced_device_retract_bed():
         error_msg = f"Bed retraction error: {str(e)}"
         log_standalone_error(error_msg, "robot")
         return error_msg
+    
+#region Soak test functions
+
+def soak_test_sem_pick_place(session_id, config):
+    """
+    Main SEM Pick & Place soak test function.
+    This runs in a separate thread to avoid blocking the web interface.
+    
+    Args:
+        session_id (int): Database session ID
+        config (dict): Test configuration
+    """
+    global soak_test_in_progress, current_soak_test_session
+    
+    # Define test positions in the correct sequence
+    test_positions = ['A1', 'A2', 'A3', 'B1', 'B2', 'B3', 'C1', 'C2', 'C3', 
+                     'D1', 'D2', 'D3', 'E1', 'E2', 'E3']
+    
+    target_cycles = config.get('cycles', 1)
+    max_retries = config.get('max_retries', 3)
+    failure_handling = config.get('failure_handling', 'skip')
+    recovery_mode = config.get('recovery_mode', 'continue')
+    
+    try:
+        print(f"Starting SEM Pick & Place soak test - Session {session_id}")
+        
+        # Initialize robot
+        robot_ready = False
+        retry_count = 0
+        max_robot_retries = 3
+        
+        while not robot_ready and retry_count < max_robot_retries:
+            if soak_test_stop_event.is_set():
+                raise Exception("Test stopped by user during initialization")
+                
+            try:
+                # Initialize robot using existing function
+                success, result = c3dp_test_connectivity(complete_test=False)
+                if success:
+                    robot_ready = True
+                    log_soak_test_operation(
+                        session_id, 'robot_init', None, True, 
+                        operation_data={'result': result}
+                    )
+                else:
+                    raise Exception(f"Robot initialization failed: {result}")
+                    
+            except Exception as e:
+                retry_count += 1
+                error_msg = f"Robot initialization attempt {retry_count} failed: {str(e)}"
+                print(error_msg)
+                
+                log_soak_test_error(
+                    session_id, 'Robot_Communication', error_msg,
+                    component='robot', recovery_action=f"Retry {retry_count}/{max_robot_retries}"
+                )
+                
+                if retry_count >= max_robot_retries:
+                    raise Exception(f"Failed to initialize robot after {max_robot_retries} attempts")
+                
+                time_module.sleep(5)  # Wait before retry
+        
+        # Home the robot
+        if not soak_test_stop_event.is_set():
+            try:
+                device_step_zero()
+                log_soak_test_operation(session_id, 'robot_home', None, True)
+            except Exception as e:
+                error_msg = f"Robot homing failed: {str(e)}"
+                log_soak_test_error(session_id, 'Robot_Movement', error_msg, component='robot')
+                raise Exception(error_msg)
+        
+        # Main test loop
+        total_operations = 0
+        successful_operations = 0
+        failed_operations = 0
+        
+        for cycle in range(1, target_cycles + 1):
+            if soak_test_stop_event.is_set():
+                break
+                
+            print(f"Starting cycle {cycle}/{target_cycles}")
+            
+            # Create cycle record
+            cycle_id = create_soak_test_cycle(session_id, cycle)
+            cycle_start_time = time_module.time()
+            
+            # Update session status
+            update_soak_test_session(session_id, {
+                'current_cycle': cycle,
+                'current_step': f'Starting cycle {cycle}'
+            })
+            
+            cycle_successful = 0
+            cycle_failed = 0
+            
+            # Test each position in the cycle
+            for position in test_positions:
+                if soak_test_stop_event.is_set():
+                    break
+                    
+                print(f"Testing position {position} (Cycle {cycle})")
+                
+                # Update current position
+                update_soak_test_session(session_id, {
+                    'current_position': position,
+                    'current_step': f'Testing position {position}'
+                })
+                
+                # Perform pick and place operation
+                position_success = False
+                retry_attempts = 0
+                
+                while not position_success and retry_attempts <= max_retries:
+                    if soak_test_stop_event.is_set():
+                        break
+                        
+                    operation_start_time = time_module.time()
+                    
+                    try:
+                        # Call the individual position test
+                        position_success = test_single_position_sem(
+                            position, session_id, cycle_id, retry_attempts
+                        )
+                        
+                        operation_duration = time_module.time() - operation_start_time
+                        total_operations += 1
+                        
+                        if position_success:
+                            successful_operations += 1
+                            cycle_successful += 1
+                            log_soak_test_operation(
+                                session_id, 'position_test', position, True,
+                                cycle_id=cycle_id, retry_count=retry_attempts,
+                                duration_seconds=operation_duration
+                            )
+                            print(f"Position {position} - SUCCESS")
+                        else:
+                            if failure_handling == 'stop':
+                                raise Exception(f"Test stopped due to failure at position {position}")
+                            elif failure_handling == 'skip':
+                                failed_operations += 1
+                                cycle_failed += 1
+                                break  # Skip to next position
+                            elif failure_handling == 'retry':
+                                retry_attempts += 1
+                                if retry_attempts > max_retries:
+                                    failed_operations += 1
+                                    cycle_failed += 1
+                                    break
+                                else:
+                                    print(f"Position {position} - RETRY {retry_attempts}")
+                                    continue
+                        
+                    except Exception as e:
+                        operation_duration = time_module.time() - operation_start_time
+                        error_msg = f"Position {position} test failed: {str(e)}"
+                        print(error_msg)
+                        
+                        log_soak_test_error(
+                            session_id, determine_soak_error_category(str(e), 'position_test'),
+                            error_msg, position=position, cycle_number=cycle, component='robot'
+                        )
+                        
+                        log_soak_test_operation(
+                            session_id, 'position_test', position, False,
+                            cycle_id=cycle_id, retry_count=retry_attempts,
+                            error_message=error_msg, duration_seconds=operation_duration
+                        )
+                        
+                        if failure_handling == 'stop':
+                            raise Exception(f"Test stopped due to error at position {position}: {str(e)}")
+                        elif failure_handling == 'skip':
+                            failed_operations += 1
+                            cycle_failed += 1
+                            break
+                        elif failure_handling == 'retry':
+                            retry_attempts += 1
+                            if retry_attempts > max_retries:
+                                failed_operations += 1
+                                cycle_failed += 1
+                                break
+                
+                # Update statistics after each position
+                current_success_rate = (successful_operations / total_operations * 100) if total_operations > 0 else 0
+                update_soak_test_session(session_id, {
+                    'total_operations': total_operations,
+                    'successful_operations': successful_operations,
+                    'failed_operations': failed_operations,
+                    'current_success_rate': current_success_rate
+                })
+            
+            # Complete cycle
+            cycle_duration = time_module.time() - cycle_start_time
+            cycle_success_rate = (cycle_successful / len(test_positions) * 100) if len(test_positions) > 0 else 0
+            
+            # Update cycle record
+            if cycle_id:
+                with get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        UPDATE soak_test_cycles 
+                        SET end_time = ?, status = ?, total_positions = ?, 
+                            successful_positions = ?, failed_positions = ?, success_rate = ?
+                        WHERE id = ?
+                    """, (
+                        datetime.now(), 'completed', len(test_positions),
+                        cycle_successful, cycle_failed, cycle_success_rate, cycle_id
+                    ))
+                    conn.commit()
+            
+            print(f"Cycle {cycle} completed - Success rate: {cycle_success_rate:.1f}%")
+            
+            # Update session
+            update_soak_test_session(session_id, {
+                'completed_cycles': cycle,
+                'current_step': f'Completed cycle {cycle}'
+            })
+        
+        # Test completed successfully
+        final_success_rate = (successful_operations / total_operations * 100) if total_operations > 0 else 0
+        session_data = get_soak_test_session(session_id)
+        start_time = datetime.fromisoformat(session_data['start_time'])
+        total_duration = (datetime.now() - start_time).total_seconds() / 60
+        
+        update_soak_test_session(session_id, {
+            'status': 'completed',
+            'end_time': datetime.now(),
+            'final_success_rate': final_success_rate,
+            'duration_minutes': total_duration,
+            'current_step': 'Test completed successfully'
+        })
+        
+        print(f"SEM Pick & Place test completed successfully - Final success rate: {final_success_rate:.1f}%")
+        
+    except Exception as e:
+        # Test failed
+        error_msg = f"SEM Pick & Place test failed: {str(e)}"
+        print(error_msg)
+        
+        update_soak_test_session(session_id, {
+            'status': 'failed',
+            'end_time': datetime.now(),
+            'failure_reason': str(e),
+            'current_step': 'Test failed'
+        })
+        
+        log_soak_test_error(
+            session_id, determine_soak_error_category(str(e), 'test_execution'),
+            error_msg, component='system'
+        )
+    
+    finally:
+        # Cleanup
+        print("Cleaning up SEM Pick & Place test")
+        
+        try:
+            # Return robot to home position
+            device_step_final()
+        except Exception as e:
+            print(f"Error during cleanup: {e}")
+        
+        # Reset global flags
+        soak_test_in_progress = False
+        current_soak_test_session = None
+        soak_test_stop_event.clear()
+
+def test_single_position_sem(position, session_id, cycle_id, retry_count):
+    """
+    Test a single SEM stub position (pick, detect, return).
+    
+    Args:
+        position (str): Position to test (e.g., 'A1')
+        session_id (int): Database session ID
+        cycle_id (int): Database cycle ID
+        retry_count (int): Current retry attempt
+    
+    Returns:
+        bool: True if successful, False if failed
+    """
+    global global_robot
+    
+    try:
+        if not global_robot:
+            raise Exception("Robot not initialized")
+        
+        print(f"Testing position {position} (attempt {retry_count + 1})")
+        
+        # Step 1: Move to standby position
+        global_robot.speed = SPEED_NORMAL
+        global_robot.moveto(*global_robot.intermediate_pos["ZHOME"])
+        
+        # Step 2: Turn on vacuum
+        control_panel_vacuum("SEM", True)
+        time_module.sleep(0.5)  # Brief pause for vacuum to stabilize
+        
+        # Step 3: Move to position and attempt to pick stub
+        print(f"Moving to position {position} for stub pickup")
+        global_robot.moveto(*global_robot.clean_stub_pos[position])
+        
+        # Descend to pickup position with progressive speeds
+        global_robot.moveto(*global_robot.clean_stub_pos["STRAY_Z1"])  # First descent level
+        global_robot.speed = SPEED_LOW
+        global_robot.moveto(*global_robot.clean_stub_pos["STRAY_Z2"])  # Second descent level
+        global_robot.speed = SPEED_VLOW
+        global_robot.moveto(*global_robot.clean_stub_pos["STRAY_Z3"])  # Final pickup position
+        
+        # Brief contact for pickup
+        time_module.sleep(0.2)
+        
+        # Ascend from pickup position
+        global_robot.moveto(*global_robot.clean_stub_pos["STRAY_Z2"])
+        global_robot.speed = SPEED_NORMAL
+        global_robot.moveto(*global_robot.intermediate_pos["ZHOME"])
+        
+        # Step 4: Move to laser detection position
+        print(f"Moving to laser for detection verification")
+        global_robot.moveto(*global_robot.equipment_pos["LASER_SEM"])
+        global_robot.moveto(*global_robot.equipment_pos["LASER_SEM_Z1"])
+        
+        # Step 5: Check laser detection
+        laser_result = control_panel_laser_status()
+        print(f"Laser detection result: {laser_result}")
+        
+        if laser_result == "LASER1":
+            # Stub successfully detected - now return it to original position
+            print(f"Stub detected! Returning to position {position}")
+            
+            # Move back to standby
+            global_robot.moveto(*global_robot.intermediate_pos["ZHOME"])
+            
+            # Return to original position
+            global_robot.moveto(*global_robot.clean_stub_pos[position])
+            global_robot.moveto(*global_robot.clean_stub_pos["STRAY_Z1"])
+            global_robot.speed = SPEED_LOW
+            global_robot.moveto(*global_robot.clean_stub_pos["STRAY_Z2"])
+            global_robot.speed = SPEED_VLOW
+            global_robot.moveto(*global_robot.clean_stub_pos["STRAY_Z3"])
+            
+            # Turn off vacuum to release stub
+            control_panel_vacuum("SEM", False)
+            time_module.sleep(PAUSE_VAC)  # Wait for vacuum release
+            
+            # Ascend after placing stub
+            global_robot.moveto(*global_robot.clean_stub_pos["STRAY_Z2"])
+            global_robot.speed = SPEED_NORMAL
+            global_robot.moveto(*global_robot.intermediate_pos["ZHOME"])
+            
+            # Log successful operation
+            log_soak_test_operation(
+                session_id, 'laser_detection', position, True,
+                cycle_id=cycle_id, retry_count=retry_count,
+                operation_data={'laser_result': laser_result, 'action': 'stub_returned'}
+            )
+            
+            print(f"Position {position} test completed successfully")
+            return True
+            
+        else:
+            # Stub not detected - this is a failure
+            print(f"Laser detection failed for position {position}")
+            
+            # Move back to standby and turn off vacuum
+            global_robot.moveto(*global_robot.intermediate_pos["ZHOME"])
+            control_panel_vacuum("SEM", False)
+            
+            # Log the detection failure
+            error_msg = f"Laser detection failed for position {position} - Expected LASER1, got {laser_result}"
+            
+            log_soak_test_error(
+                session_id, 'Laser_Detection', error_msg,
+                position=position, component='laser',
+                recovery_action=f'retry_{retry_count + 1}' if retry_count < 3 else 'skip'
+            )
+            
+            log_soak_test_operation(
+                session_id, 'laser_detection', position, False,
+                cycle_id=cycle_id, retry_count=retry_count,
+                error_message=error_msg,
+                operation_data={'laser_result': laser_result, 'expected': 'LASER1'}
+            )
+            
+            print(f"Position {position} test failed - no stub detected")
+            return False
+            
+    except Exception as e:
+        # Handle any errors during the test
+        error_msg = f"Position {position} test failed with exception: {str(e)}"
+        print(error_msg)
+        
+        # Ensure cleanup in case of error
+        try:
+            # Turn off vacuum and return to safe position
+            control_panel_vacuum("SEM", False)
+            if global_robot:
+                global_robot.speed = SPEED_NORMAL
+                global_robot.moveto(*global_robot.intermediate_pos["ZHOME"])
+        except Exception as cleanup_error:
+            print(f"Error during cleanup: {cleanup_error}")
+        
+        # Log the error
+        log_soak_test_error(
+            session_id, determine_soak_error_category(str(e), 'position_test'),
+            error_msg, position=position, component='robot',
+            recovery_action=f'retry_{retry_count + 1}' if retry_count < 3 else 'abort'
+        )
+        
+        # Don't raise the exception - return False to indicate failure
+        # The calling function will handle retry logic
+        return False
+
+#endregion
 
 
 # Map function names to handlers
@@ -1806,27 +2235,16 @@ def api_export_data():
 
 @app.route('/soak_tests')
 def soak_test_dashboard():
-    """Main soak test dashboard page."""
+    """Main soak test dashboard page with database integration."""
     try:
-        # Get current running test (if any)
-        current_test = None
-        if soak_test_in_progress and current_soak_test_session:
-            current_test = {
-                'test_type': current_soak_test_session.get('test_type', 'Unknown'),
-                'start_time': current_soak_test_session.get('start_time', 'Unknown')
-            }
+        # Get current running test from database
+        current_test = get_current_soak_test_session()
         
-        # Get recent test history (placeholder - we'll implement database queries later)
-        recent_tests = []
-        # TODO: Query soak test database for recent tests
+        # Get recent test history
+        recent_tests = get_recent_soak_tests(limit=10)
         
-        # Get success rate statistics (placeholder)
-        stats = {
-            'sem_pick_place_rate': None,  # TODO: Calculate from database
-            'sem_to_stage_rate': None,
-            'tem_cycling_rate': None,
-            'communication_rate': None
-        }
+        # Get success rate statistics
+        stats = get_soak_test_statistics()
         
         return render_template('soak_tests/dashboard.html',
                              current_test_running=current_test,
@@ -1843,18 +2261,40 @@ def soak_test_dashboard():
 
 @app.route('/soak_tests/sem_pick_place')
 def sem_pick_place_test_page():
-    """SEM Pick & Place soak test page."""
+    """SEM Pick & Place soak test page with database integration."""
     try:
-        # Get current test session (placeholder)
+        # Get current test session from database
+        current_session = get_current_soak_test_session()
         test_session = None
-        if (soak_test_in_progress and 
-            current_soak_test_session and 
-            current_soak_test_session.get('test_type') == 'sem_pick_place'):
-            test_session = current_soak_test_session
         
-        # Get recent errors for this test type (placeholder)
+        if (current_session and 
+            current_session.get('test_type') == 'sem_pick_place'):
+            
+            # Enhance session data with computed fields
+            test_session = current_session.copy()
+            
+            # Calculate elapsed time
+            if test_session.get('start_time'):
+                start_time = datetime.fromisoformat(test_session['start_time'])
+                elapsed = datetime.now() - start_time
+                test_session['elapsed_time_minutes'] = elapsed.total_seconds() / 60
+            
+            # Calculate estimated completion
+            if (test_session.get('current_cycle') and 
+                test_session.get('target_cycles') and
+                test_session.get('elapsed_time_minutes')):
+                
+                progress_ratio = test_session['current_cycle'] / test_session['target_cycles']
+                if progress_ratio > 0:
+                    total_estimated_minutes = test_session['elapsed_time_minutes'] / progress_ratio
+                    remaining_minutes = total_estimated_minutes - test_session['elapsed_time_minutes']
+                    completion_time = datetime.now() + timedelta(minutes=remaining_minutes)
+                    test_session['estimated_completion'] = completion_time.strftime('%H:%M')
+        
+        # Get recent errors for this test session
         recent_errors = []
-        # TODO: Query database for recent errors
+        if test_session:
+            recent_errors = get_soak_test_errors_for_session(test_session['id'], limit=10)
         
         return render_template('soak_tests/sem_pick_place.html',
                              test_session=test_session,
@@ -1869,25 +2309,25 @@ def sem_pick_place_test_page():
 
 @app.route('/soak_tests/sem_pick_place/start', methods=['POST'])
 def start_sem_pick_place_test():
-    """Start a new SEM Pick & Place soak test."""
-    global soak_test_in_progress, current_soak_test_session
+    """Start a new SEM Pick & Place soak test with database integration."""
+    global soak_test_in_progress, current_soak_test_session, current_soak_test_thread
     
     try:
         # Check if another test is running
-        if soak_test_in_progress:
+        if soak_test_in_progress or get_current_soak_test_session():
             return jsonify({
                 'success': False,
                 'message': 'Another soak test is currently running. Please wait for it to complete.'
             })
         
-        # Get configuration from request
+        # Get and validate configuration
         config = request.json
         cycles = int(config.get('cycles', 5))
         max_retries = int(config.get('max_retries', 3))
         failure_handling = config.get('failure_handling', 'skip')
         recovery_mode = config.get('recovery_mode', 'continue')
         
-        # Validate configuration
+        # Validation
         if cycles < 1 or cycles > 1000:
             return jsonify({
                 'success': False,
@@ -1900,41 +2340,49 @@ def start_sem_pick_place_test():
                 'message': 'Max retries must be between 1 and 10.'
             })
         
-        # Set up test session
-        soak_test_in_progress = True
-        current_soak_test_session = {
-            'test_type': 'sem_pick_place',
-            'start_time': datetime.now().isoformat(),
-            'target_cycles': cycles,
-            'max_retries': max_retries,
-            'failure_handling': failure_handling,
-            'recovery_mode': recovery_mode,
-            'current_cycle': 0,
-            'current_position': None,
-            'status': 'running',
-            'total_operations': 0,
-            'successful_operations': 0,
-            'failed_operations': 0,
-            'current_success_rate': 0.0,
-            'completed_positions': [],
-            'failed_positions': [],
-            'estimated_completion': None,
-            'elapsed_time_minutes': 0
-        }
+        if failure_handling not in ['skip', 'retry', 'stop']:
+            return jsonify({
+                'success': False,
+                'message': 'Invalid failure handling option.'
+            })
         
-        # TODO: Start the actual test in a background thread
-        # For now, we'll just set up the session structure
-        print(f"Starting SEM Pick & Place test with {cycles} cycles")
+        if recovery_mode not in ['continue', 'restart']:
+            return jsonify({
+                'success': False,
+                'message': 'Invalid recovery mode option.'
+            })
+        
+        # Create database session
+        session_id = create_soak_test_session('sem_pick_place', config)
+        if not session_id:
+            return jsonify({
+                'success': False,
+                'message': 'Failed to create test session in database.'
+            })
+        
+        # Set global flags
+        soak_test_in_progress = True
+        soak_test_stop_event.clear()
+        
+        # Start test in background thread
+        current_soak_test_thread = threading.Thread(
+            target=soak_test_sem_pick_place,
+            args=(session_id, config),
+            daemon=True
+        )
+        current_soak_test_thread.start()
+        
+        print(f"Started SEM Pick & Place test - Session ID: {session_id}")
         
         return jsonify({
             'success': True,
-            'message': 'Test started successfully'
+            'message': 'Test started successfully',
+            'session_id': session_id
         })
         
     except Exception as e:
         # Reset flags on error
         soak_test_in_progress = False
-        current_soak_test_session = None
         print(f"Error starting SEM pick & place test: {e}")
         return jsonify({
             'success': False,
@@ -1944,26 +2392,25 @@ def start_sem_pick_place_test():
 @app.route('/soak_tests/sem_pick_place/pause', methods=['POST'])
 def pause_sem_pick_place_test():
     """Pause the current SEM Pick & Place test."""
-    global current_soak_test_session
-    
     try:
-        if (not soak_test_in_progress or 
-            not current_soak_test_session or 
-            current_soak_test_session.get('test_type') != 'sem_pick_place'):
+        current_session = get_current_soak_test_session()
+        
+        if (not current_session or 
+            current_session.get('test_type') != 'sem_pick_place' or
+            current_session.get('status') != 'running'):
             return jsonify({
                 'success': False,
-                'message': 'No SEM Pick & Place test is currently running.'
+                'message': 'No running SEM Pick & Place test found.'
             })
         
-        if current_soak_test_session.get('status') != 'running':
-            return jsonify({
-                'success': False,
-                'message': 'Test is not currently running.'
-            })
+        # Update database
+        update_soak_test_session(current_session['id'], {
+            'status': 'paused',
+            'current_step': 'Test paused by user'
+        })
         
-        # Pause the test
-        current_soak_test_session['status'] = 'paused'
-        # TODO: Actually pause the background test thread
+        # Note: The actual pausing logic would need to be implemented in the test thread
+        # For now, we just update the database status
         
         print("SEM Pick & Place test paused")
         return jsonify({
@@ -1981,26 +2428,25 @@ def pause_sem_pick_place_test():
 @app.route('/soak_tests/sem_pick_place/resume', methods=['POST'])
 def resume_sem_pick_place_test():
     """Resume the paused SEM Pick & Place test."""
-    global current_soak_test_session
-    
     try:
-        if (not soak_test_in_progress or 
-            not current_soak_test_session or 
-            current_soak_test_session.get('test_type') != 'sem_pick_place'):
+        current_session = get_current_soak_test_session()
+        
+        if (not current_session or 
+            current_session.get('test_type') != 'sem_pick_place' or
+            current_session.get('status') != 'paused'):
             return jsonify({
                 'success': False,
-                'message': 'No SEM Pick & Place test session found.'
+                'message': 'No paused SEM Pick & Place test found.'
             })
         
-        if current_soak_test_session.get('status') != 'paused':
-            return jsonify({
-                'success': False,
-                'message': 'Test is not currently paused.'
-            })
+        # Update database
+        update_soak_test_session(current_session['id'], {
+            'status': 'running',
+            'current_step': 'Test resumed by user'
+        })
         
-        # Resume the test
-        current_soak_test_session['status'] = 'running'
-        # TODO: Actually resume the background test thread
+        # Note: The actual resuming logic would need to be implemented in the test thread
+        # For now, we just update the database status
         
         print("SEM Pick & Place test resumed")
         return jsonify({
@@ -2021,19 +2467,25 @@ def stop_sem_pick_place_test():
     global soak_test_in_progress, current_soak_test_session
     
     try:
-        if (not soak_test_in_progress or 
-            not current_soak_test_session or 
-            current_soak_test_session.get('test_type') != 'sem_pick_place'):
+        current_session = get_current_soak_test_session()
+        
+        if (not current_session or 
+            current_session.get('test_type') != 'sem_pick_place'):
             return jsonify({
                 'success': False,
-                'message': 'No SEM Pick & Place test is currently running.'
+                'message': 'No SEM Pick & Place test found.'
             })
         
-        # Stop the test
-        current_soak_test_session['status'] = 'stopped'
-        current_soak_test_session['end_time'] = datetime.now().isoformat()
-        # TODO: Actually stop the background test thread
-        # TODO: Save final results to database
+        # Signal the test thread to stop
+        soak_test_stop_event.set()
+        
+        # Update database
+        update_soak_test_session(current_session['id'], {
+            'status': 'stopped',
+            'end_time': datetime.now(),
+            'current_step': 'Test stopped by user',
+            'failure_reason': 'User requested stop'
+        })
         
         # Reset global flags
         soak_test_in_progress = False

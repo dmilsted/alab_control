@@ -1,7 +1,7 @@
 import sqlite3
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from contextlib import contextmanager
 import threading
 
@@ -586,3 +586,434 @@ def get_component_reliability():
     except Exception as e:
         print(f"Error getting component reliability: {e}")
         return []
+    
+#region Soak test functions
+
+def init_soak_test_database():
+    """
+    Initialize soak test database tables.
+    Call this function after your existing init_database() function.
+    """
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        
+        # Create soak_test_sessions table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS soak_test_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                test_type TEXT NOT NULL,
+                start_time DATETIME NOT NULL,
+                end_time DATETIME,
+                status TEXT NOT NULL DEFAULT 'running',
+                target_cycles INTEGER NOT NULL,
+                completed_cycles INTEGER DEFAULT 0,
+                max_retries INTEGER NOT NULL,
+                failure_handling TEXT NOT NULL,
+                recovery_mode TEXT NOT NULL,
+                current_cycle INTEGER DEFAULT 0,
+                current_position TEXT,
+                current_step TEXT,
+                total_operations INTEGER DEFAULT 0,
+                successful_operations INTEGER DEFAULT 0,
+                failed_operations INTEGER DEFAULT 0,
+                current_success_rate REAL DEFAULT 0.0,
+                final_success_rate REAL,
+                failure_reason TEXT,
+                test_parameters TEXT,
+                duration_minutes REAL,
+                estimated_completion DATETIME
+            )
+        """)
+        
+        # Create soak_test_cycles table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS soak_test_cycles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                cycle_number INTEGER NOT NULL,
+                start_time DATETIME NOT NULL,
+                end_time DATETIME,
+                status TEXT NOT NULL DEFAULT 'running',
+                total_positions INTEGER DEFAULT 0,
+                successful_positions INTEGER DEFAULT 0,
+                failed_positions INTEGER DEFAULT 0,
+                success_rate REAL DEFAULT 0.0,
+                cycle_data TEXT,
+                FOREIGN KEY (session_id) REFERENCES soak_test_sessions (id)
+            )
+        """)
+        
+        # Create soak_test_operations table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS soak_test_operations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                cycle_id INTEGER,
+                operation_type TEXT NOT NULL,
+                position TEXT,
+                start_time DATETIME NOT NULL,
+                end_time DATETIME,
+                success BOOLEAN NOT NULL DEFAULT 0,
+                retry_count INTEGER DEFAULT 0,
+                operation_data TEXT,
+                error_message TEXT,
+                duration_seconds REAL,
+                FOREIGN KEY (session_id) REFERENCES soak_test_sessions (id),
+                FOREIGN KEY (cycle_id) REFERENCES soak_test_cycles (id)
+            )
+        """)
+        
+        # Create soak_test_errors table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS soak_test_errors (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                operation_id INTEGER,
+                timestamp DATETIME NOT NULL,
+                error_category TEXT NOT NULL,
+                error_message TEXT NOT NULL,
+                position TEXT,
+                cycle_number INTEGER,
+                component TEXT,
+                recovery_action TEXT,
+                FOREIGN KEY (session_id) REFERENCES soak_test_sessions (id),
+                FOREIGN KEY (operation_id) REFERENCES soak_test_operations (id)
+            )
+        """)
+        
+        # Create indexes for better performance
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_soak_sessions_type_time 
+            ON soak_test_sessions(test_type, start_time)
+        """)
+        
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_soak_cycles_session 
+            ON soak_test_cycles(session_id, cycle_number)
+        """)
+        
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_soak_operations_session 
+            ON soak_test_operations(session_id, start_time)
+        """)
+        
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_soak_errors_session 
+            ON soak_test_errors(session_id, timestamp)
+        """)
+        
+        conn.commit()
+        print("Soak test database tables initialized successfully")
+
+def create_soak_test_session(test_type, config):
+    """
+    Create a new soak test session.
+    
+    Args:
+        test_type (str): Type of test ('sem_pick_place', 'tem_cycling', etc.)
+        config (dict): Test configuration parameters
+    
+    Returns:
+        int: Session ID of the created session
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                INSERT INTO soak_test_sessions (
+                    test_type, start_time, target_cycles, max_retries,
+                    failure_handling, recovery_mode, test_parameters
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                test_type,
+                datetime.now(),
+                config.get('cycles', 1),
+                config.get('max_retries', 3),
+                config.get('failure_handling', 'skip'),
+                config.get('recovery_mode', 'continue'),
+                json.dumps(config)
+            ))
+            
+            session_id = cursor.lastrowid
+            conn.commit()
+            
+            print(f"Created soak test session {session_id}: {test_type}")
+            return session_id
+            
+    except Exception as e:
+        print(f"Error creating soak test session: {e}")
+        return None
+
+def update_soak_test_session(session_id, updates):
+    """
+    Update a soak test session with new data.
+    
+    Args:
+        session_id (int): Session ID to update
+        updates (dict): Dictionary of fields to update
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Build dynamic update query
+            update_fields = []
+            values = []
+            
+            for field, value in updates.items():
+                update_fields.append(f"{field} = ?")
+                values.append(value)
+            
+            if update_fields:
+                values.append(session_id)
+                query = f"""
+                    UPDATE soak_test_sessions 
+                    SET {', '.join(update_fields)}
+                    WHERE id = ?
+                """
+                cursor.execute(query, values)
+                conn.commit()
+                
+    except Exception as e:
+        print(f"Error updating soak test session {session_id}: {e}")
+
+def get_soak_test_session(session_id):
+    """Get soak test session data."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT * FROM soak_test_sessions WHERE id = ?
+            """, (session_id,))
+            
+            row = cursor.fetchone()
+            return dict(row) if row else None
+            
+    except Exception as e:
+        print(f"Error getting soak test session {session_id}: {e}")
+        return None
+
+def get_current_soak_test_session():
+    """Get the currently running soak test session."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT * FROM soak_test_sessions 
+                WHERE status IN ('running', 'paused')
+                ORDER BY start_time DESC
+                LIMIT 1
+            """)
+            
+            row = cursor.fetchone()
+            return dict(row) if row else None
+            
+    except Exception as e:
+        print(f"Error getting current soak test session: {e}")
+        return None
+
+def create_soak_test_cycle(session_id, cycle_number):
+    """Create a new test cycle within a session."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                INSERT INTO soak_test_cycles (
+                    session_id, cycle_number, start_time
+                ) VALUES (?, ?, ?)
+            """, (session_id, cycle_number, datetime.now()))
+            
+            cycle_id = cursor.lastrowid
+            conn.commit()
+            
+            return cycle_id
+            
+    except Exception as e:
+        print(f"Error creating soak test cycle: {e}")
+        return None
+
+def log_soak_test_operation(session_id, operation_type, position, success, 
+                           cycle_id=None, retry_count=0, error_message=None, 
+                           duration_seconds=None, operation_data=None):
+    """Log a single soak test operation."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                INSERT INTO soak_test_operations (
+                    session_id, cycle_id, operation_type, position, start_time,
+                    end_time, success, retry_count, operation_data, error_message,
+                    duration_seconds
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                session_id, cycle_id, operation_type, position,
+                datetime.now() - timedelta(seconds=duration_seconds or 0),
+                datetime.now(), success, retry_count,
+                json.dumps(operation_data) if operation_data else None,
+                error_message, duration_seconds
+            ))
+            
+            operation_id = cursor.lastrowid
+            conn.commit()
+            
+            return operation_id
+            
+    except Exception as e:
+        print(f"Error logging soak test operation: {e}")
+        return None
+
+def log_soak_test_error(session_id, error_category, error_message, 
+                       position=None, cycle_number=None, component=None, 
+                       operation_id=None, recovery_action=None):
+    """Log a soak test error."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                INSERT INTO soak_test_errors (
+                    session_id, operation_id, timestamp, error_category,
+                    error_message, position, cycle_number, component, recovery_action
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                session_id, operation_id, datetime.now(), error_category,
+                error_message, position, cycle_number, component, recovery_action
+            ))
+            
+            conn.commit()
+            
+    except Exception as e:
+        print(f"Error logging soak test error: {e}")
+
+def get_soak_test_statistics():
+    """Get overall soak test statistics for the dashboard."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Get success rates by test type
+            cursor.execute("""
+                SELECT 
+                    test_type,
+                    AVG(final_success_rate) as avg_success_rate,
+                    COUNT(*) as total_tests
+                FROM soak_test_sessions 
+                WHERE status = 'completed' AND final_success_rate IS NOT NULL
+                GROUP BY test_type
+            """)
+            
+            stats = {}
+            for row in cursor.fetchall():
+                row_dict = dict(row)
+                test_type = row_dict['test_type']
+                stats[f"{test_type}_rate"] = round(row_dict['avg_success_rate'], 1)
+            
+            return stats
+            
+    except Exception as e:
+        print(f"Error getting soak test statistics: {e}")
+        return {}
+
+def get_recent_soak_tests(limit=10):
+    """Get recent soak test sessions for the dashboard."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT 
+                    id, test_type, start_time, end_time, status,
+                    target_cycles, completed_cycles, final_success_rate,
+                    duration_minutes
+                FROM soak_test_sessions 
+                ORDER BY start_time DESC 
+                LIMIT ?
+            """, (limit,))
+            
+            tests = []
+            for row in cursor.fetchall():
+                row_dict = dict(row)
+                # Add computed fields
+                row_dict['cycles_completed'] = row_dict['completed_cycles'] or 0
+                row_dict['target_cycles'] = row_dict['target_cycles'] or 0
+                row_dict['success_rate'] = row_dict['final_success_rate']
+                tests.append(row_dict)
+            
+            return tests
+            
+    except Exception as e:
+        print(f"Error getting recent soak tests: {e}")
+        return []
+
+def get_soak_test_errors_for_session(session_id, limit=20):
+    """Get recent errors for a specific test session."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT timestamp, error_message, position, cycle_number, component
+                FROM soak_test_errors 
+                WHERE session_id = ?
+                ORDER BY timestamp DESC 
+                LIMIT ?
+            """, (session_id, limit))
+            
+            return [dict(row) for row in cursor.fetchall()]
+            
+    except Exception as e:
+        print(f"Error getting soak test errors for session {session_id}: {e}")
+        return []
+
+# Soak test specific error categories
+SOAK_TEST_ERROR_CATEGORIES = {
+    'Robot_Movement': 'Error during robot movement operations',
+    'Robot_Communication': 'Communication failure with 3D printer',
+    'PLC_Communication': 'Communication failure with PLC',
+    'Laser_Detection': 'Laser sensor detection failure',
+    'Vacuum_System': 'Vacuum pump or suction failure',
+    'Position_Error': 'Incorrect positioning or calibration',
+    'Gripper_Error': 'Gripper operation failure',
+    'Rotator_Error': 'Rotator mechanism failure',
+    'Timeout_Error': 'Operation timeout',
+    'User_Abort': 'User requested stop/abort',
+    'System_Error': 'General system or software error',
+    'Test_Logic': 'Error in test logic or sequencing'
+}
+
+def determine_soak_error_category(error_message, operation_type):
+    """Determine error category for soak test errors."""
+    error_lower = error_message.lower()
+    
+    if any(keyword in error_lower for keyword in ['robot', '3dp', 'printer', 'movement', 'position']):
+        if 'communication' in error_lower or 'connection' in error_lower:
+            return 'Robot_Communication'
+        elif 'position' in error_lower or 'coordinate' in error_lower:
+            return 'Position_Error'
+        else:
+            return 'Robot_Movement'
+    elif any(keyword in error_lower for keyword in ['plc', 'socket', 'timeout', 'macstat']):
+        return 'PLC_Communication'
+    elif any(keyword in error_lower for keyword in ['laser', 'detection', 'sensor']):
+        return 'Laser_Detection'
+    elif any(keyword in error_lower for keyword in ['vacuum', 'suction', 'pump']):
+        return 'Vacuum_System'
+    elif any(keyword in error_lower for keyword in ['gripper', 'grip']):
+        return 'Gripper_Error'
+    elif any(keyword in error_lower for keyword in ['rotator', 'rotation', 'flip']):
+        return 'Rotator_Error'
+    elif any(keyword in error_lower for keyword in ['timeout', 'time out']):
+        return 'Timeout_Error'
+    elif any(keyword in error_lower for keyword in ['abort', 'stop', 'cancel']):
+        return 'User_Abort'
+    elif 'test' in error_lower or operation_type in error_lower:
+        return 'Test_Logic'
+    else:
+        return 'System_Error'
+    
+#endregion
