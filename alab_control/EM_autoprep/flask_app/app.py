@@ -4735,6 +4735,10 @@ def udp_server():
                 # Emit to all connected clients using socketio.emit
                 socketio.emit('function_response', {'result': result}, namespace='/')
                 
+                # Convert result to string if it's not already
+                if not isinstance(result, str):
+                    result = str(result)
+                
                 # Send response back through UDP and include an EOF marker
                 response = result + "\n"
                 udp_socket.sendto(response.encode('utf-8'), addr)
@@ -4746,8 +4750,19 @@ def udp_server():
 
 # Helper function to parse UDP messages in key=value format
 def parse_udp_message(message):
+    """Parse UDP messages in key=value format and strip whitespace from values."""
     try:
-        return dict(item.split("=") for item in message.split("&"))
+        # Strip whitespace from the entire message first
+        message = message.strip()
+        
+        # Parse key=value pairs
+        params = {}
+        for item in message.split("&"):
+            if "=" in item:
+                key, value = item.split("=", 1)  # Only split on first =
+                params[key.strip()] = value.strip()  # Strip whitespace from both key and value
+        
+        return params
     except ValueError:
         return {}
 
