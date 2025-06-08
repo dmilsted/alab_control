@@ -45,7 +45,7 @@ socketio = SocketIO(app, async_mode='threading')  # Important: Specify async_mod
 host_ip = "0.0.0.0"  # Set to listen on all interfaces
 web_port = 8000
 udp_port = 8001
-server_ip = "192.168.1.1" #change to server's IP. This is google :)
+server_ip = "192.168.1.1"
 plc_ip = '192.168.1.172'
 plc_port = 8888
 c3dp_com_port = "COM7"
@@ -4506,6 +4506,9 @@ def dispatch_action(data):
             socketio.emit('function_response', {'result': error_msg})
             return error_msg
     
+    # If no soak test is running, proceed with normal dispatch
+    return original_dispatch_action(data)
+    
 # If no soak test is running, proceed with normal dispatch:
 def original_dispatch_action(data):
     """
@@ -4707,9 +4710,17 @@ def determine_error_component(function_type, error_message):
 # UDP server function to handle commands and respond via UDP and Socket.IO
 def udp_server():
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp_socket:
-        udp_socket.bind((host_ip, udp_port))
-        print(f"UDP server listening on {host_ip}:{udp_port}")
-
+        udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if hasattr(socket, 'SO_REUSEPORT'):
+            udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        
+        try:
+            udp_socket.bind((host_ip, udp_port))
+            print(f"UDP server listening on {host_ip}:{udp_port}")
+        except OSError as e:
+            print(f"Failed to bind UDP socket: {e}")
+            return
+        
         while True:
             try:
                 data, addr = udp_socket.recvfrom(1024)
