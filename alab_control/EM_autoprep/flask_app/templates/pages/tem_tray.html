@@ -74,6 +74,24 @@
                 </label>
                 <small class="form-text text-muted" style="color: #f44336;">⚠️ Warning: Skipping verification may result in process continuation without a grid</small>
             </div>
+            <div class="form-card">
+    <h2 class="main-subtitle">Vibration Motor Settings</h2>
+    
+    <div class="form-group">
+        <label>Enable Vibration Motors During Exposure:</label>
+        <div style="margin-top: 10px;">
+            <div style="margin-bottom: 10px;">
+                <input type="checkbox" id="sem_motor1_enabled" name="sem_motor1_enabled" value="true">
+                <label for="sem_motor1_enabled" style="margin-left: 5px;">Enable Vibration Motor 1</label>
+            </div>
+            <div>
+                <input type="checkbox" id="sem_motor2_enabled" name="sem_motor2_enabled" value="true">
+                <label for="sem_motor2_enabled" style="margin-left: 5px;">Enable Vibration Motor 2</label>
+            </div>
+        </div>
+        <small class="form-text text-muted">Motors will activate just before exposure and turn off after completion</small>
+    </div>
+</div>
 
             <div class="button-group">
                 <button type="submit" class="btn btn-secondary">Prepare Sample</button>

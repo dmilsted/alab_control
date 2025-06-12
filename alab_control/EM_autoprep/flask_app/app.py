@@ -2,7 +2,7 @@ from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO
 import socket
 import threading
-import serial.tools.list_ports  # Ensure this is imported
+import serial.tools.list_ports
 from alab_control.ender3 import Ender3
 import subprocess
 import csv
@@ -10,7 +10,6 @@ import os
 import time
 from datetime import datetime, timedelta
 import json
-import time as time_module  # Import as time_module to avoid conflict with the 'time' variable
 from database import (
     init_database, 
     start_process_run, 
@@ -39,7 +38,7 @@ from database import (
 )
 
 app = Flask(__name__)
-#socketio = SocketIO(app, async_mode='threading')  # This was removed because it was lagging the server. Adding eventlet (pip install eventlet) fixed the lag
+# Eventlet was added because it was lagging the server. Adding it fixed the lag. Install with "pip install eventlet"
 socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins="*", logger=True, engineio_logger=True)
 
 # Define IPs and ports, and 3DP COM port
@@ -504,6 +503,43 @@ def control_panel_tem_grid_holder_close():
 
 def control_panel_shutdown():
     return send_plc_command("SHUTDWN")
+
+def control_panel_vibration_motor_1_on():
+    return send_plc_command("EXPOSURM11")
+
+def control_panel_vibration_motor_1_off():
+    return send_plc_command("EXPOSURM10")
+
+def control_panel_vibration_motor_2_on():
+    return send_plc_command("EXPOSURM21")
+
+def control_panel_vibration_motor_2_off():
+    return send_plc_command("EXPOSURM20")
+
+def control_panel_vibration_motor_both_on():
+    return send_plc_command("EXPOSURM31")
+
+def control_panel_vibration_motor_both_off():
+    return send_plc_command("EXPOSURM30")
+
+def control_panel_vibration_motor_all_off():
+    return send_plc_command("EXPOSURM00")
+
+def control_vibration_motors(motor1_enabled, motor2_enabled, turn_on=True):
+    if turn_on:
+        if motor1_enabled and motor2_enabled:
+            # Both motors enabled - use both on command
+            control_panel_vibration_motor_both_on()
+        elif motor1_enabled:
+            # Only motor 1 enabled
+            control_panel_vibration_motor_1_on()
+        elif motor2_enabled:
+            # Only motor 2 enabled
+            control_panel_vibration_motor_2_on()
+        # If neither enabled, do nothing
+    else:
+        # Turn off - always use all off command for safety
+        control_panel_vibration_motor_all_off()
 
 def control_panel_rotator(flip_state):
     if flip_state == "faceDown":
@@ -1652,7 +1688,7 @@ def soak_test_sem_pick_place(session_id, config):
                 if retry_count >= max_robot_retries:
                     raise Exception(f"Failed to initialize robot after {max_robot_retries} attempts")
                 
-                time_module.sleep(5)  # Wait before retry
+                time.sleep(5)  # Wait before retry
         
         # Home the robot
         if not soak_test_stop_event.is_set():
@@ -1677,7 +1713,7 @@ def soak_test_sem_pick_place(session_id, config):
             
             # Create cycle record
             cycle_id = create_soak_test_cycle(session_id, cycle)
-            cycle_start_time = time_module.time()
+            cycle_start_time = time.time()
             
             # Update session status
             update_soak_test_session(session_id, {
@@ -1709,7 +1745,7 @@ def soak_test_sem_pick_place(session_id, config):
                     if soak_test_stop_event.is_set():
                         break
                         
-                    operation_start_time = time_module.time()
+                    operation_start_time = time.time()
                     
                     try:
                         # Call the individual position test
@@ -1717,7 +1753,7 @@ def soak_test_sem_pick_place(session_id, config):
                             position, session_id, cycle_id, retry_attempts
                         )
                         
-                        operation_duration = time_module.time() - operation_start_time
+                        operation_duration = time.time() - operation_start_time
                         total_operations += 1
                         
                         if position_success:
@@ -1747,7 +1783,7 @@ def soak_test_sem_pick_place(session_id, config):
                                     continue
                         
                     except Exception as e:
-                        operation_duration = time_module.time() - operation_start_time
+                        operation_duration = time.time() - operation_start_time
                         error_msg = f"Position {position} test failed: {str(e)}"
                         print(error_msg)
                         
@@ -1785,7 +1821,7 @@ def soak_test_sem_pick_place(session_id, config):
                 })
             
             # Complete cycle
-            cycle_duration = time_module.time() - cycle_start_time
+            cycle_duration = time.time() - cycle_start_time
             cycle_success_rate = (cycle_successful / len(test_positions) * 100) if len(test_positions) > 0 else 0
             
             # Update cycle record
@@ -1886,7 +1922,7 @@ def test_single_position_sem(position, session_id, cycle_id, retry_count):
         
         # Step 2: Turn on vacuum
         control_panel_vacuum("SEM", True)
-        time_module.sleep(0.5)  # Brief pause for vacuum to stabilize
+        time.sleep(0.5)  # Brief pause for vacuum to stabilize
         
         # Step 3: Move to position and attempt to pick stub
         print(f"Moving to position {position} for stub pickup")
@@ -1900,7 +1936,7 @@ def test_single_position_sem(position, session_id, cycle_id, retry_count):
         global_robot.moveto(*global_robot.clean_stub_pos["STRAY_Z3"])  # Final pickup position
         
         # Brief contact for pickup
-        time_module.sleep(0.2)
+        time.sleep(0.2)
         
         # Ascend from pickup position
         global_robot.moveto(*global_robot.clean_stub_pos["STRAY_Z2"])
@@ -1933,7 +1969,7 @@ def test_single_position_sem(position, session_id, cycle_id, retry_count):
             
             # Turn off vacuum to release stub
             control_panel_vacuum("SEM", False)
-            time_module.sleep(PAUSE_VAC)  # Wait for vacuum release
+            time.sleep(PAUSE_VAC)  # Wait for vacuum release
             
             # Ascend after placing stub
             global_robot.moveto(*global_robot.clean_stub_pos["STRAY_Z2"])
@@ -2073,7 +2109,7 @@ def soak_test_sem_to_stage(session_id, config):
                 if retry_count >= max_robot_retries:
                     raise Exception(f"Failed to initialize robot after {max_robot_retries} attempts")
                 
-                time_module.sleep(5)
+                time.sleep(5)
         
         # Home the robot
         if not soak_test_stop_event.is_set():
@@ -2092,7 +2128,7 @@ def soak_test_sem_to_stage(session_id, config):
         
         # Create single cycle record
         cycle_id = create_soak_test_cycle(session_id, 1)
-        cycle_start_time = time_module.time()
+        cycle_start_time = time.time()
         
         # Update session status
         update_soak_test_session(session_id, {
@@ -2142,7 +2178,7 @@ def soak_test_sem_to_stage(session_id, config):
             })
         
         # Complete the test
-        cycle_duration = time_module.time() - cycle_start_time
+        cycle_duration = time.time() - cycle_start_time
         cycle_success_rate = (successful_operations / len(transfer_pairs) * 100) if len(transfer_pairs) > 0 else 0
         
         # Update cycle record
@@ -2234,7 +2270,7 @@ def perform_sem_to_stage_transfer(session_id, cycle_id, tray_pos, stage_pos, max
             
             print(f"Transferring stub {tray_pos}→{stage_pos} (attempt {retry_count + 1})")
             
-            operation_start_time = time_module.time()
+            operation_start_time = time.time()
             
             # Step 1: Move to standby position
             global_robot.speed = SPEED_NORMAL
@@ -2280,7 +2316,7 @@ def perform_sem_to_stage_transfer(session_id, cycle_id, tray_pos, stage_pos, max
                     print(f"Retrying {tray_pos}→{stage_pos} (attempt {retry_count + 1})")
                     continue
                 else:
-                    operation_duration = time_module.time() - operation_start_time
+                    operation_duration = time.time() - operation_start_time
                     log_soak_test_operation(
                         session_id, 'tray_to_stage_transfer', f"{tray_pos}→{stage_pos}", False,
                         cycle_id=cycle_id, retry_count=retry_count,
@@ -2301,7 +2337,7 @@ def perform_sem_to_stage_transfer(session_id, cycle_id, tray_pos, stage_pos, max
             global_robot.speed = SPEED_VLOW
             global_robot.moveto(*global_robot.equipment_pos["ROTATOR_ENGAGE"])
             control_panel_vacuum("SEM", False)  # Release from needle
-            time_module.sleep(PAUSE_VAC)
+            time.sleep(PAUSE_VAC)
             global_robot.speed = SPEED_NORMAL
             global_robot.moveto(*global_robot.intermediate_pos["ZHOME"])
             
@@ -2355,7 +2391,7 @@ def perform_sem_to_stage_transfer(session_id, cycle_id, tray_pos, stage_pos, max
             global_robot.moveto(y=global_robot.intermediate_pos["HOME"][1])
             
             # Log successful operation
-            operation_duration = time_module.time() - operation_start_time
+            operation_duration = time.time() - operation_start_time
             log_soak_test_operation(
                 session_id, 'tray_to_stage_transfer', f"{tray_pos}→{stage_pos}", True,
                 cycle_id=cycle_id, retry_count=retry_count,
@@ -2393,11 +2429,11 @@ def perform_sem_to_stage_transfer(session_id, cycle_id, tray_pos, stage_pos, max
             if failure_handling == 'retry' and retry_count < max_retries:
                 retry_count += 1
                 print(f"Retrying {tray_pos}→{stage_pos} (attempt {retry_count + 1})")
-                time_module.sleep(2)  # Longer pause before retry for complex operation
+                time.sleep(2)  # Longer pause before retry for complex operation
                 continue
             else:
                 # Log failed operation
-                operation_duration = time_module.time() - operation_start_time
+                operation_duration = time.time() - operation_start_time
                 log_soak_test_operation(
                     session_id, 'tray_to_stage_transfer', f"{tray_pos}→{stage_pos}", False,
                     cycle_id=cycle_id, retry_count=retry_count,
@@ -2469,7 +2505,7 @@ def soak_test_communication_stress(session_id, config):
                     if attempt >= 2:
                         raise Exception(f"Failed to initialize robot after 3 attempts")
                     
-                    time_module.sleep(2)
+                    time.sleep(2)
         
         if test_type in ['plc', 'both']:
             # Test PLC connectivity
@@ -2501,7 +2537,7 @@ def soak_test_communication_stress(session_id, config):
                     if attempt >= 2:
                         raise Exception(f"Failed to initialize PLC after 3 attempts")
                     
-                    time_module.sleep(2)
+                    time.sleep(2)
         
         # Main test loop
         total_operations = 0
@@ -2516,7 +2552,7 @@ def soak_test_communication_stress(session_id, config):
             
             # Create cycle record
             cycle_id = create_soak_test_cycle(session_id, cycle)
-            cycle_start_time = time_module.time()
+            cycle_start_time = time.time()
             
             # Update session status
             update_soak_test_session(session_id, {
@@ -2576,7 +2612,7 @@ def soak_test_communication_stress(session_id, config):
                 })
             
             # Complete cycle
-            cycle_duration = time_module.time() - cycle_start_time
+            cycle_duration = time.time() - cycle_start_time
             cycle_success_rate = (cycle_successful / len(speed_intervals) * 100) if len(speed_intervals) > 0 else 0
             
             # Update cycle record
@@ -2694,7 +2730,7 @@ def test_communication_interval(session_id, cycle_id, interval, commands_per_spe
                         stats['timeouts'] += 1
             
             # Wait for the specified interval
-            time_module.sleep(interval)
+            time.sleep(interval)
             
             # Check failure rate periodically
             if (command_num + 1) % 5 == 0:  # Check every 5 commands
@@ -2739,11 +2775,11 @@ def test_communication_interval(session_id, cycle_id, interval, commands_per_spe
 
 def test_single_plc_command(session_id, cycle_id, interval):
     """Test a single PLC command and measure response time."""
-    start_time = time_module.time()
+    start_time = time.time()
     
     try:
         result = control_panel_get_macstat()
-        response_time = time_module.time() - start_time
+        response_time = time.time() - start_time
         
         # Check if response is valid
         if "MACSTAT" in result or "STANDBY" in result or "SHUTDWN" in result:
@@ -2758,7 +2794,7 @@ def test_single_plc_command(session_id, cycle_id, interval):
             return False, response_time
             
     except Exception as e:
-        response_time = time_module.time() - start_time
+        response_time = time.time() - start_time
         
         # Check if it's a timeout
         if "timeout" in str(e).lower():
@@ -2775,7 +2811,7 @@ def test_single_robot_command(session_id, cycle_id, interval):
     """Test a single robot command and measure response time."""
     global global_robot
     
-    start_time = time_module.time()
+    start_time = time.time()
     
     try:
         if not global_robot:
@@ -2784,7 +2820,7 @@ def test_single_robot_command(session_id, cycle_id, interval):
         # Send M114 command to get position
         if global_robot.test_connection():
             global_robot.get_current_position()
-            response_time = time_module.time() - start_time
+            response_time = time.time() - start_time
             
             # Check if we got a valid position
             if global_robot.has_been_homed:
@@ -2797,7 +2833,7 @@ def test_single_robot_command(session_id, cycle_id, interval):
                 )
                 return False, response_time
         else:
-            response_time = time_module.time() - start_time
+            response_time = time.time() - start_time
             log_soak_test_error(
                 session_id, 'Robot_Communication',
                 "Robot connection test failed",
@@ -2806,7 +2842,7 @@ def test_single_robot_command(session_id, cycle_id, interval):
             return False, response_time
             
     except Exception as e:
-        response_time = time_module.time() - start_time
+        response_time = time.time() - start_time
         
         # Check if it's a timeout
         if "timeout" in str(e).lower():
@@ -2881,7 +2917,7 @@ def soak_test_tem_cycling(session_id, config):
                 if retry_count >= max_robot_retries:
                     raise Exception(f"Failed to initialize robot after {max_robot_retries} attempts")
                 
-                time_module.sleep(5)
+                time.sleep(5)
         
         # Home the robot
         if not soak_test_stop_event.is_set():
@@ -2906,7 +2942,7 @@ def soak_test_tem_cycling(session_id, config):
             
             # Create cycle record
             cycle_id = create_soak_test_cycle(session_id, cycle)
-            cycle_start_time = time_module.time()
+            cycle_start_time = time.time()
             
             # Update session status
             update_soak_test_session(session_id, {
@@ -2954,7 +2990,7 @@ def soak_test_tem_cycling(session_id, config):
             
             # Short pause between phases
             if not soak_test_stop_event.is_set():
-                time_module.sleep(2)
+                time.sleep(2)
             
             # Phase 2: Move all disks from TE back to TC (used to clean)
             print(f"Phase 2: Moving disks TE→TC (Cycle {cycle})")
@@ -2993,7 +3029,7 @@ def soak_test_tem_cycling(session_id, config):
                 })
             
             # Complete cycle
-            cycle_duration = time_module.time() - cycle_start_time
+            cycle_duration = time.time() - cycle_start_time
             total_positions_in_cycle = len(disk_pairs) * 2  # Both directions
             cycle_success_rate = (cycle_successful / total_positions_in_cycle * 100) if total_positions_in_cycle > 0 else 0
             
@@ -3095,7 +3131,7 @@ def perform_tem_disk_transfer(session_id, cycle_id, origin, destination, max_ret
             
             print(f"Transferring disk {origin}→{destination} (attempt {retry_count + 1})")
             
-            operation_start_time = time_module.time()
+            operation_start_time = time.time()
             
             # Step 1: Move to standby position
             global_robot.speed = SPEED_NORMAL
@@ -3114,7 +3150,7 @@ def perform_tem_disk_transfer(session_id, cycle_id, origin, destination, max_ret
             # Step 3: Open TEM grid holder and turn on vacuum
             global_robot.moveto(x=disk_positions[origin][0])
             control_panel_tem_grid_holder_open()
-            time_module.sleep(1.5)
+            time.sleep(1.5)
             control_panel_vacuum("TEM", True)
             
             # Step 4: Pick up disk
@@ -3157,7 +3193,7 @@ def perform_tem_disk_transfer(session_id, cycle_id, origin, destination, max_ret
                     print(f"Retrying {origin}→{destination} (attempt {retry_count + 1})")
                     continue
                 else:
-                    operation_duration = time_module.time() - operation_start_time
+                    operation_duration = time.time() - operation_start_time
                     log_soak_test_operation(
                         session_id, 'disk_transfer', f"{origin}→{destination}", False,
                         cycle_id=cycle_id, retry_count=retry_count,
@@ -3167,9 +3203,9 @@ def perform_tem_disk_transfer(session_id, cycle_id, origin, destination, max_ret
                     return False
             
             # Step 6: Close grid holder
-            time_module.sleep(1)
+            time.sleep(1)
             control_panel_tem_grid_holder_close()
-            time_module.sleep(1)
+            time.sleep(1)
             
             # Step 7: Move to destination area
             if destination.startswith('TC'):
@@ -3184,7 +3220,7 @@ def perform_tem_disk_transfer(session_id, cycle_id, origin, destination, max_ret
             # Step 8: Place disk at destination (separate X/Y movement to avoid contamination)
             global_robot.moveto(x=dest_positions[destination][0])
             control_panel_tem_grid_holder_open()
-            time_module.sleep(1)
+            time.sleep(1)
             global_robot.moveto(y=dest_positions[destination][1])
             global_robot.moveto(*dest_positions[dest_z_positions[0]])
             global_robot.speed = SPEED_LOW
@@ -3194,21 +3230,21 @@ def perform_tem_disk_transfer(session_id, cycle_id, origin, destination, max_ret
             
             # Turn off vacuum to release disk
             control_panel_vacuum("TEM", False)
-            time_module.sleep(PAUSE_VAC)
+            time.sleep(PAUSE_VAC)
             
             global_robot.moveto(*dest_positions[dest_z_positions[1]])
             global_robot.speed = SPEED_NORMAL
             global_robot.moveto(*global_robot.intermediate_pos["ZHOME"])
-            time_module.sleep(1)
+            time.sleep(1)
             control_panel_tem_grid_holder_close()
-            time_module.sleep(1)
+            time.sleep(1)
             
             # Step 9: Return to home position
             global_robot.moveto(x=global_robot.intermediate_pos["HOME"][0])
             global_robot.moveto(y=global_robot.intermediate_pos["HOME"][1])
             
             # Log successful operation
-            operation_duration = time_module.time() - operation_start_time
+            operation_duration = time.time() - operation_start_time
             log_soak_test_operation(
                 session_id, 'disk_transfer', f"{origin}→{destination}", True,
                 cycle_id=cycle_id, retry_count=retry_count,
@@ -3244,11 +3280,11 @@ def perform_tem_disk_transfer(session_id, cycle_id, origin, destination, max_ret
             if failure_handling == 'retry' and retry_count < max_retries:
                 retry_count += 1
                 print(f"Retrying {origin}→{destination} (attempt {retry_count + 1})")
-                time_module.sleep(1)  # Brief pause before retry
+                time.sleep(1)  # Brief pause before retry
                 continue
             else:
                 # Log failed operation
-                operation_duration = time_module.time() - operation_start_time
+                operation_duration = time.time() - operation_start_time
                 log_soak_test_operation(
                     session_id, 'disk_transfer', f"{origin}→{destination}", False,
                     cycle_id=cycle_id, retry_count=retry_count,
@@ -3273,6 +3309,7 @@ function_map = {
     'c3dp_test_connectivity': c3dp_test_connectivity,
     'c3dp_test_connectivity_machine_test_page': lambda: enhanced_c3dp_test_connectivity(True)[1],
     'server_test_connectivity': server_test_connectivity,
+    'control_panel_get_macstat': enhanced_control_panel_get_macstat,
     'control_panel_standby': control_panel_standby,
     'control_panel_shutdown': control_panel_shutdown,
     'control_panel_sem_stage_open': control_panel_sem_stage_open,
@@ -3282,12 +3319,18 @@ function_map = {
     'control_panel_gripper_home': control_panel_gripper_home,
     'control_panel_gripper_close': control_panel_gripper_close,
     'control_panel_rotator': control_panel_rotator,
+    'control_panel_vibration_motor_1_on': control_panel_vibration_motor_1_on,
+    'control_panel_vibration_motor_1_off': control_panel_vibration_motor_1_off,
+    'control_panel_vibration_motor_2_on': control_panel_vibration_motor_2_on,
+    'control_panel_vibration_motor_2_off': control_panel_vibration_motor_2_off,
+    'control_panel_vibration_motor_both_on': control_panel_vibration_motor_both_on,
+    'control_panel_vibration_motor_both_off': control_panel_vibration_motor_both_off,
+    'control_panel_vibration_motor_all_off': control_panel_vibration_motor_all_off,
     'device_extend_bed': enhanced_device_extend_bed,
     'device_retract_bed': enhanced_device_retract_bed,
     'robot_manual_move': move_robot_manual,
     'robot_manual_home': home_robot_manual,
-    'send_manual_plc_command': send_manual_plc_command,
-    'control_panel_get_macstat': enhanced_control_panel_get_macstat
+    'send_manual_plc_command': send_manual_plc_command
 }
 
 @app.route('/get_page/<page>')
@@ -4526,7 +4569,7 @@ def original_dispatch_action(data):
     
     # Start process run logging for major operations
     process_run_id = None
-    start_time = time_module.time()
+    start_time = time.time()
     
     if should_log_process(function_type):
         # Extract parameters for logging
@@ -4545,7 +4588,7 @@ def original_dispatch_action(data):
         error_msg = f"Unknown function type: {function_type}"
         if process_run_id:
             log_error(process_run_id, error_msg, "system")
-            end_process_run(process_run_id, False, "User_Error", time_module.time() - start_time)
+            end_process_run(process_run_id, False, "User_Error", time.time() - start_time)
         else:
             log_standalone_error(error_msg, "system")
         return error_msg
@@ -4597,7 +4640,7 @@ def original_dispatch_action(data):
         
         # Log successful completion for major processes
         if process_run_id and process_run_id in current_process_runs:
-            duration = time_module.time() - start_time
+            duration = time.time() - start_time
             # Check if result indicates success (you may need to adjust this logic)
             success = not (isinstance(result, str) and ("error" in result.lower() or "failed" in result.lower()))
             
@@ -4618,7 +4661,7 @@ def original_dispatch_action(data):
         # Log the error
         if process_run_id:
             log_error(process_run_id, error_msg, determine_error_component(function_type, str(e)))
-            duration = time_module.time() - start_time
+            duration = time.time() - start_time
             end_process_run(process_run_id, False, determine_error_category(str(e)), duration)
             
             # Clean up tracking
