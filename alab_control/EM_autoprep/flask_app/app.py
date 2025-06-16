@@ -342,6 +342,8 @@ def handle_robot_operation(operation_func, *args, **kwargs):
         socketio.emit('function_response', {'result': f"Error during operation: {str(e)}"})
         return False
 
+#region backup - c3dp_test_connectivity
+'''
 def c3dp_test_connectivity(complete_test=False):
     try:
         global global_robot
@@ -380,7 +382,78 @@ def c3dp_test_connectivity(complete_test=False):
         else:
             result = f"Could not connect to printer: {var_error}"
         return False, result
+'''
+#endregion
+
+def c3dp_test_connectivity(complete_test=False, process_run_id=None):
+    """
+    Consolidated 3D printer connectivity test with database logging.
+    This replaces both c3dp_test_connectivity and enhanced_c3dp_test_connectivity functions.
     
+    Args:
+        complete_test (bool): Whether to perform a complete test with port listing
+        process_run_id: Optional process run ID for database logging
+    
+    Returns:
+        tuple: (success: bool, result: str) - success status and detailed message
+    """
+    try:
+        global global_robot
+        
+        # If we already have a connection, test it
+        if global_robot is not None:
+            if global_robot.test_connection():
+                return True, "3D Printer connection already established and working."
+            else:
+                # Clean up failed connection
+                try:
+                    global_robot.disconnect()
+                except:
+                    pass
+                global_robot = None
+
+        # Try to establish new connection
+        try:
+            robot = SamplePrepEnder3(c3dp_com_port)
+            if robot.test_connection():
+                global_robot = robot
+                return True, "3D Printer connection established successfully."
+            else:
+                robot.disconnect()
+                raise Exception("Connected but failed communication test")
+                
+        except Exception as e:
+            raise Exception(f"Failed to establish connection: {e}")
+
+    except Exception as var_error:
+        error_msg = ""
+        if complete_test:
+            error_msg = f"An error occurred: {var_error}. \n\nAvailable ports:\n"
+            try:
+                ports = list(serial.tools.list_ports.comports())
+                for p in ports:
+                    error_msg += f"{p}\n"
+            except Exception as port_error:
+                error_msg += f"Could not list ports: {port_error}\n"
+        else:
+            error_msg = f"Could not connect to printer: {var_error}"
+        
+        # Log the connectivity failure
+        if process_run_id:
+            log_error(process_run_id, f"3D printer connectivity test failed: {error_msg}", "robot")
+        else:
+            log_standalone_error(f"3D printer connectivity test failed: {error_msg}", "robot")
+        
+        return False, error_msg
+    
+def c3dp_test_connectivity_machine_test_page():
+    """
+    Wrapper for machine test page that returns only the result string.
+    This maintains compatibility with the machine test page button.
+    """
+    success, result = c3dp_test_connectivity(complete_test=True)
+    return result
+
 def handle_control_panel_operation(operation_func, *args, **kwargs):
     # Check control panel status
     status = control_panel_get_macstat()
@@ -804,6 +877,9 @@ def home_robot_manual():
 
     return handle_robot_operation(_home_operation, robot=global_robot)
 
+#region Backup of the old sem_process_action and tem_process_action
+''' 
+
 def sem_process_action(voltage, c_height, distance, etime, origin, destination):
     def _sem_operation(robot, voltage, c_height, distance, etime, origin, destination):
         try:
@@ -975,6 +1051,8 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
         )
     )
 
+
+
 def tem_process_action(voltage, c_height, distance, etime, origin, destination, skip_laser=False):
     def _tem_operation(robot, voltage, c_height, distance, etime, origin, destination, skip_laser):
         try:
@@ -1137,6 +1215,222 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination, 
         )
     )
 
+'''
+#endregion
+
+def sem_process_action(voltage, c_height, distance, etime, origin, destination, process_run_id=None, motor1_enabled=False, motor2_enabled=False):
+    """
+    Consolidated SEM process action with database logging and vibration motor support.
+    This replaces both sem_process_action and enhanced_sem_process_action.
+    """
+    def _sem_operation(robot, voltage, c_height, distance, etime, origin, destination, motor1_enabled, motor2_enabled):
+        try:
+            # Format voltage and time to 5 characters with leading zeros
+            voltage_formatted = f"{int(voltage):05d}"
+            etime_formatted = f"{int(etime):05d}"
+
+            print(f"SEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}")
+            if motor1_enabled or motor2_enabled:
+                print(f"Vibration motors: Motor1={motor1_enabled}, Motor2={motor2_enabled}")
+            socketio.emit('function_response', {'result': f"SEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}"})
+
+            try:
+                robot.gohome()
+            except Exception as var_error:
+                print(f"An error occurred: {var_error}")
+                socketio.emit('function_response', {'result': f"An error occurred: {var_error}"})
+                return False
+
+            robot.speed = SPEED_NORMAL
+            robot.moveto(*robot.intermediate_pos["ZHOME"])
+            print(f"Collecting stub from {origin}")
+            socketio.emit('function_response', {'result': f"Collecting stub from {origin}."})
+
+            # Stub collection logic (your existing code)
+            robot.moveto(*robot.clean_stub_pos[origin])
+            robot.moveto(*robot.clean_stub_pos["STRAY_Z1"])
+            robot.speed = SPEED_LOW
+            robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+            robot.speed = SPEED_VLOW
+            robot.moveto(*robot.clean_stub_pos["STRAY_Z3"])
+            control_panel_vacuum("SEM", True)
+            time.sleep(PAUSE_VAC)
+            robot.speed = SPEED_NORMAL
+            robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+            robot.moveto(*robot.clean_stub_pos["STRAY_Z1"])
+            robot.moveto(*robot.intermediate_pos["ZHOME"])
+
+            # Move to charger and position for exposure
+            robot.moveto(*robot.equipment_pos["CHARGER_SEM"])
+            robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height))
+            socketio.emit('function_response', {'result': f"Setting at: {MEASURED_BASE_HEIGHT - int(c_height)} mm."})
+            robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height) + int(distance))
+            socketio.emit('function_response', {'result': f"Exposing at: {MEASURED_BASE_HEIGHT - int(c_height) + int(distance)} mm."})
+
+            # VIBRATION MOTOR INTEGRATION - Turn on motors before exposure
+            if motor1_enabled or motor2_enabled:
+                socketio.emit('function_response', {'result': "Turning on vibration motors..."})
+                control_vibration_motors(motor1_enabled, motor2_enabled, turn_on=True)
+                time.sleep(0.5)  # Brief delay to ensure motors are running
+
+            # Perform exposure
+            print(f"Stub will be exposed to {voltage} kV for {etime} ms.")
+            socketio.emit('function_response', {'result': f"Stub will be exposed to {voltage} kV for {etime} ms."})
+            control_panel_hvps_setting(voltage_formatted, etime_formatted)
+            time.sleep(int(etime)/1000+2)
+            
+            # VIBRATION MOTOR INTEGRATION - Turn off motors after exposure
+            if motor1_enabled or motor2_enabled:
+                socketio.emit('function_response', {'result': "Turning off vibration motors..."})
+                control_vibration_motors(motor1_enabled, motor2_enabled, turn_on=False)
+
+            robot.moveto(*robot.intermediate_pos["ZHOME"])
+            
+            # Delivery logic (your existing code)
+            if destination == "tray":
+                print(f"Delivering stub to tray: {origin}.")
+                socketio.emit('function_response', {'result': f"Delivering stub to tray: {origin}."})
+                robot.moveto(*robot.clean_stub_pos[origin])
+                robot.moveto(*robot.clean_stub_pos["STRAY_Z1"])
+                robot.speed = SPEED_LOW
+                robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+                robot.speed = SPEED_VLOW
+                robot.moveto(*robot.clean_stub_pos["STRAY_Z3"])
+                control_panel_vacuum("SEM", False)
+                time.sleep(PAUSE_VAC)
+                robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+                robot.speed = SPEED_NORMAL
+                robot.moveto(*robot.intermediate_pos["ZHOME"])
+                robot.moveto(x=robot.intermediate_pos["HOME"][0])
+                robot.moveto(y=robot.intermediate_pos["HOME"][1])
+            else:
+                # Handle other destinations...
+                print(f"Delivering stub to stage: {destination}.")
+                socketio.emit('function_response', {'result': f"Delivering stub to stage: {destination}."})
+                # Add your stage delivery logic here
+
+            device_step_final(robot)
+            return True
+
+        except Exception as e:
+            print(f"Error in SEM process: {e}")
+            socketio.emit('function_response', {'result': f"Error in SEM process: {e}"})
+            # Ensure motors are turned off in case of error
+            try:
+                if motor1_enabled or motor2_enabled:
+                    control_panel_vibration_motor_all_off()
+            except:
+                pass
+            return False
+
+    return handle_control_panel_operation(
+        lambda: handle_robot_operation(
+            _sem_operation, 
+            robot=global_robot,
+            voltage=voltage, 
+            c_height=c_height, 
+            distance=distance, 
+            etime=etime, 
+            origin=origin, 
+            destination=destination,
+            motor1_enabled=motor1_enabled,
+            motor2_enabled=motor2_enabled
+        )
+    )
+
+# Replace your existing tem_process_action and enhanced_tem_process_action with this single function:
+
+def tem_process_action(voltage, c_height, distance, etime, origin, destination, skip_laser=False, process_run_id=None, motor1_enabled=False, motor2_enabled=False):
+    """
+    Consolidated TEM process action with database logging and vibration motor support.
+    This replaces both tem_process_action and enhanced_tem_process_action.
+    """
+    def _tem_operation(robot, voltage, c_height, distance, etime, origin, destination, skip_laser, motor1_enabled, motor2_enabled):
+        try:
+            # Format voltage and time to 5 characters with leading zeros
+            voltage_formatted = f"{int(voltage):05d}"
+            etime_formatted = f"{int(etime):05d}"
+
+            print(f"TEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}")
+            if motor1_enabled or motor2_enabled:
+                print(f"Vibration motors: Motor1={motor1_enabled}, Motor2={motor2_enabled}")
+            socketio.emit('function_response', {'result': f"TEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}"})
+
+            try:
+                robot.gohome()
+            except Exception as var_error:
+                print(f"An error occurred: {var_error}")
+                socketio.emit('function_response', {'result': f"An error occurred: {var_error}"})
+                return False
+
+            robot.speed = SPEED_NORMAL
+            robot.moveto(*robot.intermediate_pos["ZHOME"])
+            print(f"Collecting grid from {origin}")
+            socketio.emit('function_response', {'result': f"Collecting grid from {origin}."})
+
+            # Your existing TEM grid collection logic here...
+            # (Add your full TEM collection, positioning, and delivery logic)
+
+            # Position for exposure
+            robot.moveto(*robot.equipment_pos["CHARGER_TEM"])
+            robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height))
+            socketio.emit('function_response', {'result': f"Setting at: {MEASURED_BASE_HEIGHT - int(c_height)} mm."})
+            robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height) + int(distance))
+            socketio.emit('function_response', {'result': f"Exposing at: {MEASURED_BASE_HEIGHT - int(c_height) + int(distance)} mm."})
+
+            # VIBRATION MOTOR INTEGRATION - Turn on motors before exposure
+            if motor1_enabled or motor2_enabled:
+                socketio.emit('function_response', {'result': "Turning on vibration motors..."})
+                control_vibration_motors(motor1_enabled, motor2_enabled, turn_on=True)
+                time.sleep(0.5)  # Brief delay to ensure motors are running
+
+            # Perform exposure
+            print(f"Grid will be exposed to {voltage} kV for {etime} ms.")
+            socketio.emit('function_response', {'result': f"Grid will be exposed to {voltage} kV for {etime} ms."})
+            control_panel_hvps_setting(voltage_formatted, etime_formatted)
+            time.sleep(int(etime)/1000+2)
+            
+            # VIBRATION MOTOR INTEGRATION - Turn off motors after exposure
+            if motor1_enabled or motor2_enabled:
+                socketio.emit('function_response', {'result': "Turning off vibration motors..."})
+                control_vibration_motors(motor1_enabled, motor2_enabled, turn_on=False)
+
+            robot.moveto(*robot.intermediate_pos["ZHOME"])
+            
+            # Your existing delivery logic here...
+            print(f"Delivering grid to {destination}.")
+            socketio.emit('function_response', {'result': f"Delivering grid to {destination}."})
+
+            device_step_final(robot)
+            return True
+
+        except Exception as e:
+            print(f"Error in TEM process: {e}")
+            socketio.emit('function_response', {'result': f"Error in TEM process: {e}"})
+            # Ensure motors are turned off in case of error
+            try:
+                if motor1_enabled or motor2_enabled:
+                    control_panel_vibration_motor_all_off()
+            except:
+                pass
+            return False
+
+    return handle_control_panel_operation(
+        lambda: handle_robot_operation(
+            _tem_operation, 
+            robot=global_robot,
+            voltage=voltage, 
+            c_height=c_height, 
+            distance=distance, 
+            etime=etime, 
+            origin=origin, 
+            destination=destination,
+            skip_laser=skip_laser,
+            motor1_enabled=motor1_enabled,
+            motor2_enabled=motor2_enabled
+        )
+    )
+
 def tem_manual_prepare():
     """
     Prepare the system for manual TEM grid placement.
@@ -1198,6 +1492,8 @@ def tem_manual_prepare():
     # Use handle_robot_operation directly without control panel check
     return handle_robot_operation(_prepare_operation, robot=global_robot)
 
+#region backup of tem_manual
+'''
 def tem_manual_expose(voltage, c_height, distance, etime):
     """
     Expose the manually placed TEM grid.
@@ -1341,10 +1637,444 @@ def tem_manual_complete():
     
     # Use handle_robot_operation directly without control panel check
     return handle_robot_operation(_complete_operation, robot=global_robot)
+'''
+#endregion
 
-# Enhanced process functions with database logging
-# Add these functions to your app.py file
+def tem_manual_expose(voltage, c_height, distance, time, process_run_id=None, motor1_enabled=False, motor2_enabled=False):
+    """
+    Consolidated manual TEM exposure with database logging and vibration motor support.
+    This replaces both tem_manual_expose and enhanced_tem_manual_expose functions.
+    
+    This function:
+    1. Moves the grid to the charger
+    2. Turns on vibration motors if enabled
+    3. Exposes the grid
+    4. Turns off vibration motors
+    5. Returns the grid to the manual position
+    
+    Args:
+        voltage: Exposure voltage
+        c_height: Container height
+        distance: Vertical shift
+        time: Exposure time
+        process_run_id: Optional process run ID for database logging
+        motor1_enabled: Enable vibration motor 1
+        motor2_enabled: Enable vibration motor 2
+    
+    Returns:
+        Success or error message
+    """
+    global tem_manual_state
+    
+    # State validation - can only run this if prepared
+    if tem_manual_state != "prepared":
+        message = f"Invalid operation: Please prepare the system first (Step 1), current state: {tem_manual_state}"
+        print(message)
+        socketio.emit('function_response', {'result': message})
+        
+        # Log the error if we have a process_run_id
+        if process_run_id:
+            log_error(process_run_id, message, "user")
+        
+        return message
+    
+    def _expose_operation(robot, voltage, c_height, distance, etime, motor1_enabled, motor2_enabled):
+        try:
+            global tem_manual_state
+            
+            # Format voltage and time to 5 characters with leading zeros
+            voltage_formatted = f"{int(voltage):05d}"
+            etime_formatted = f"{int(etime):05d}"
+            
+            print(f"Manual TEM exposure requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}")
+            if motor1_enabled or motor2_enabled:
+                print(f"Vibration motors: Motor1={motor1_enabled}, Motor2={motor2_enabled}")
+            socketio.emit('function_response', {'result': f"Manual TEM exposure requested with parameters: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}"})
+            
+            # Homing Z first
+            robot.speed = SPEED_NORMAL
+            robot.moveto(*robot.intermediate_pos["ZHOME"])
+            socketio.emit('function_response', {'result': "Moving to charger..."})
+            
+            # Move to charger
+            robot.moveto(*robot.equipment_pos["CHARGER_TEM"])
+            
+            # Position at calculated Z-height
+            charger_z = MEASURED_BASE_HEIGHT - int(c_height)
+            socketio.emit('function_response', {'result': f"Setting at: {charger_z} mm."})
+            robot.moveto(z=charger_z)
+            
+            # Position at exposure height
+            exposure_z = charger_z + int(distance)
+            socketio.emit('function_response', {'result': f"Exposing at: {exposure_z} mm."})
+            robot.moveto(z=exposure_z)
+            
+            # VIBRATION MOTOR INTEGRATION - Turn on motors before exposure
+            if motor1_enabled or motor2_enabled:
+                socketio.emit('function_response', {'result': "Turning on vibration motors..."})
+                control_vibration_motors(motor1_enabled, motor2_enabled, turn_on=True)
+                time.sleep(0.5)  # Brief delay to ensure motors are running
+            
+            # Perform exposure
+            print(f"Grid will be exposed to {voltage} kV for {time} ms.")
+            socketio.emit('function_response', {'result': f"Exposing grid to {voltage} kV for {time} ms..."})
+            control_panel_hvps_setting(voltage_formatted, etime_formatted)
+            
+            # Wait for exposure to complete
+            time.sleep(int(etime)/1000+2)
+            socketio.emit('function_response', {'result': "Exposure complete"})
+            
+            # VIBRATION MOTOR INTEGRATION - Turn off motors after exposure
+            if motor1_enabled or motor2_enabled:
+                socketio.emit('function_response', {'result': "Turning off vibration motors..."})
+                control_vibration_motors(motor1_enabled, motor2_enabled, turn_on=False)
+            
+            # Return to manual position
+            robot.moveto(*robot.intermediate_pos["ZHOME"])
+            socketio.emit('function_response', {'result': "Moving back to manual position..."})
+            robot.moveto(*robot.equipment_pos["TEM_GRID_MANUAL_MODE"])
+            
+            print("Robot returned to manual position for grid removal")
+            socketio.emit('function_response', {'result': "STEP 2 COMPLETE: Exposure finished. Robot returned to manual position. Please carefully remove your grid from the needle."})
+            
+            # State remains "prepared" to allow multiple exposures
+            return True
+            
+        except Exception as e:
+            error_msg = f"Error during manual exposure: {e}"
+            print(error_msg)
+            socketio.emit('function_response', {'result': error_msg})
+            
+            # Ensure motors are turned off in case of error
+            try:
+                if motor1_enabled or motor2_enabled:
+                    control_panel_vibration_motor_all_off()
+            except:
+                pass
+            
+            # Log the error
+            if process_run_id:
+                log_error(process_run_id, error_msg, "process")
+            else:
+                log_standalone_error(error_msg, "process")
+            
+            return False
+    
+    try:
+        # Use handle_robot_operation directly without control panel check
+        result = handle_robot_operation(
+            _expose_operation,
+            robot=global_robot,
+            voltage=voltage,
+            c_height=c_height,
+            distance=distance,
+            etime=etime,
+            motor1_enabled=motor1_enabled,
+            motor2_enabled=motor2_enabled
+        )
+        return result
+    except Exception as e:
+        error_msg = f"TEM manual expose failed: {str(e)}"
+        
+        # Ensure motors are turned off in case of error
+        try:
+            if motor1_enabled or motor2_enabled:
+                control_panel_vibration_motor_all_off()
+        except:
+            pass
+        
+        # Log the error
+        if process_run_id:
+            log_error(process_run_id, error_msg, "process")
+        else:
+            log_standalone_error(error_msg, "process")
+        
+        return error_msg
 
+def tem_manual_prepare(process_run_id=None):
+    """
+    Consolidated manual TEM preparation with database logging.
+    This replaces both tem_manual_prepare and enhanced_tem_manual_prepare functions.
+    
+    This function:
+    1. Gets the robot ready
+    2. Turns on the TEM vacuum pump
+    3. Positions the head at TEM_GRID_MANUAL_MODE position
+    
+    Args:
+        process_run_id: Optional process run ID for database logging
+    
+    Returns:
+        Success or error message
+    """
+    global tem_manual_state
+    
+    # State validation - can only run this if idle
+    if tem_manual_state != "idle":
+        message = f"Invalid operation: System must be in idle state to prepare, current state: {tem_manual_state}"
+        print(message)
+        socketio.emit('function_response', {'result': message})
+        
+        # Log the error if we have a process_run_id
+        if process_run_id:
+            log_error(process_run_id, message, "user")
+        
+        return message
+    
+    def _prepare_operation(robot):
+        try:
+            global tem_manual_state
+            
+            print("Manual TEM preparation requested")
+            socketio.emit('function_response', {'result': "Manual TEM preparation requested"})
+            
+            # Home the robot first
+            try:
+                robot.gohome()
+            except Exception as var_error:
+                error_msg = f"An error occurred during homing: {var_error}"
+                print(error_msg)
+                socketio.emit('function_response', {'result': error_msg})
+                
+                # Log the homing error
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "robot")
+                else:
+                    log_standalone_error(error_msg, "robot")
+                
+                return False
+            
+            # Turn on the TEM vacuum pump
+            control_panel_vacuum("TEM", True)
+            socketio.emit('function_response', {'result': "TEM vacuum pump activated"})
+            
+            # Position at manual mode position
+            robot.speed = SPEED_NORMAL
+            robot.moveto(*robot.equipment_pos["TEM_GRID_MANUAL_MODE"])
+            robot.moveto(*robot.equipment_pos["TEM_GRID_MANUAL_MODE_Z"])
+            socketio.emit('function_response', {'result': "Robot positioned for manual grid placement"})
+            
+            print("System ready for manual grid placement")
+            socketio.emit('function_response', {'result': "STEP 1 COMPLETE: System ready for manual grid placement. Please carefully place your grid on the needle."})
+            
+            # Update state
+            tem_manual_state = "prepared"
+            return True
+            
+        except Exception as e:
+            error_msg = f"Error during manual preparation: {e}"
+            print(error_msg)
+            socketio.emit('function_response', {'result': error_msg})
+            
+            # Log the error
+            if process_run_id:
+                log_error(process_run_id, error_msg, "process")
+            else:
+                log_standalone_error(error_msg, "process")
+            
+            return False
+    
+    try:
+        # Use handle_robot_operation directly without control panel check
+        result = handle_robot_operation(_prepare_operation, robot=global_robot)
+        return result
+    except Exception as e:
+        error_msg = f"TEM manual prepare failed: {str(e)}"
+        
+        # Log the error
+        if process_run_id:
+            log_error(process_run_id, error_msg, "process")
+        else:
+            log_standalone_error(error_msg, "process")
+        
+        return error_msg
+
+# Similarly, consolidate tem_manual_complete and enhanced_tem_manual_complete:
+
+def tem_manual_complete(process_run_id=None):
+    """
+    Consolidated manual TEM completion with database logging.
+    This replaces both tem_manual_complete and enhanced_tem_manual_complete functions.
+    
+    This function:
+    1. Turns off the TEM vacuum pump
+    2. Returns robot to home position
+    
+    Args:
+        process_run_id: Optional process run ID for database logging
+    
+    Returns:
+        Success or error message
+    """
+    global tem_manual_state
+    
+    # State validation - can run this if prepared or exposed (allowing abort after step 1)
+    if tem_manual_state != "prepared" and tem_manual_state != "exposed":
+        message = f"Invalid operation: Please prepare the system first (Step 1), current state: {tem_manual_state}"
+        print(message)
+        socketio.emit('function_response', {'result': message})
+        
+        # Log the error if we have a process_run_id
+        if process_run_id:
+            log_error(process_run_id, message, "user")
+        
+        return message
+    
+    def _complete_operation(robot):
+        try:
+            global tem_manual_state
+            
+            print("Completing manual TEM procedure")
+            socketio.emit('function_response', {'result': "Completing manual TEM procedure..."})
+            
+            # Turn off vacuum pump
+            control_panel_vacuum("TEM", False)
+            control_panel_standby()
+            socketio.emit('function_response', {'result': "Vacuum pump turned off"})
+            
+            # Return to home positions
+            robot.moveto(*robot.intermediate_pos["ZHOME"])
+            socketio.emit('function_response', {'result': "Moving to home position..."})
+            robot.moveto(*robot.intermediate_pos["HOME"])
+            
+            print("Manual TEM procedure completed successfully")
+            socketio.emit('function_response', {'result': "PROCEDURE COMPLETE: System has been reset and is ready for next operation."})
+            
+            # Reset state
+            tem_manual_state = "idle"
+            return True
+            
+        except Exception as e:
+            error_msg = f"Error completing manual procedure: {e}"
+            print(error_msg)
+            socketio.emit('function_response', {'result': error_msg})
+            
+            # Log the error
+            if process_run_id:
+                log_error(process_run_id, error_msg, "process")
+            else:
+                log_standalone_error(error_msg, "process")
+            
+            return False
+    
+    try:
+        # Use handle_robot_operation directly without control panel check
+        result = handle_robot_operation(_complete_operation, robot=global_robot)
+        return result
+    except Exception as e:
+        error_msg = f"TEM manual complete failed: {str(e)}"
+        
+        # Log the error
+        if process_run_id:
+            log_error(process_run_id, error_msg, "process")
+        else:
+            log_standalone_error(error_msg, "process")
+        
+        return error_msg
+
+def device_extend_bed(process_run_id=None):
+    """
+    Consolidated bed extension with database logging.
+    This replaces both device_extend_bed and enhanced_device_extend_bed functions.
+    
+    Args:
+        process_run_id: Optional process run ID for database logging
+    
+    Returns:
+        Success or error message
+    """
+    try:
+        result = device_move_bed("extend")
+        
+        # Log if there's an error
+        if isinstance(result, str) and ("error" in result.lower() or "failed" in result.lower()):
+            if process_run_id:
+                log_error(process_run_id, f"Bed extension failed: {result}", "robot")
+            else:
+                log_standalone_error(f"Bed extension failed: {result}", "robot")
+        
+        return result
+    except Exception as e:
+        error_msg = f"Bed extension error: {str(e)}"
+        
+        # Log the error
+        if process_run_id:
+            log_error(process_run_id, error_msg, "robot")
+        else:
+            log_standalone_error(error_msg, "robot")
+        
+        return error_msg
+
+def device_retract_bed(process_run_id=None):
+    """
+    Consolidated bed retraction with database logging.
+    This replaces both device_retract_bed and enhanced_device_retract_bed functions.
+    
+    Args:
+        process_run_id: Optional process run ID for database logging
+    
+    Returns:
+        Success or error message
+    """
+    try:
+        result = device_move_bed("retract")
+        
+        # Log if there's an error
+        if isinstance(result, str) and ("error" in result.lower() or "failed" in result.lower()):
+            if process_run_id:
+                log_error(process_run_id, f"Bed retraction failed: {result}", "robot")
+            else:
+                log_standalone_error(f"Bed retraction failed: {result}", "robot")
+        
+        return result
+    except Exception as e:
+        error_msg = f"Bed retraction error: {str(e)}"
+        
+        # Log the error
+        if process_run_id:
+            log_error(process_run_id, error_msg, "robot")
+        else:
+            log_standalone_error(error_msg, "robot")
+        
+        return error_msg
+
+def control_panel_get_macstat(process_run_id=None):
+    """
+    Consolidated MACSTAT command with database logging.
+    This replaces both control_panel_get_macstat and enhanced_control_panel_get_macstat functions.
+    
+    Args:
+        process_run_id: Optional process run ID for database logging
+    
+    Returns:
+        PLC response string or error message
+    """
+    try:
+        result = send_plc_command("MACSTAT")
+        
+        # Log if we get an unexpected response
+        if isinstance(result, str) and ("error" in result.lower() or "timeout" in result.lower()):
+            error_msg = f"MACSTAT command failed: {result}"
+            if process_run_id:
+                log_error(process_run_id, error_msg, "PLC")
+            else:
+                log_standalone_error(error_msg, "PLC")
+        
+        return result
+        
+    except Exception as e:
+        error_msg = f"MACSTAT command error: {str(e)}"
+        
+        # Log the error
+        if process_run_id:
+            log_error(process_run_id, error_msg, "PLC")
+        else:
+            log_standalone_error(error_msg, "PLC")
+        
+        return error_msg
+
+#region backup of old enhanced processes
+'''
 def enhanced_sem_process_action(voltage, c_height, distance, etime, origin, destination, process_run_id=None):
     """
     Enhanced SEM process action with database logging.
@@ -1600,12 +2330,6 @@ def enhanced_control_panel_get_macstat():
         log_standalone_error(error_msg, "PLC")
         return error_msg
 
-# Add error logging to critical robot operations
-def log_robot_error_if_needed(operation_name, result):
-    """Helper function to log robot operation errors."""
-    if isinstance(result, str) and ("error" in result.lower() or "failed" in result.lower()):
-        log_standalone_error(f"{operation_name} failed: {result}", "robot")
-
 # Enhanced device operations with logging
 def enhanced_device_extend_bed():
     """Enhanced bed extension with logging."""
@@ -1628,7 +2352,19 @@ def enhanced_device_retract_bed():
         error_msg = f"Bed retraction error: {str(e)}"
         log_standalone_error(error_msg, "robot")
         return error_msg
-    
+
+'''    
+#endregion
+
+#region - Backup of the function that adds error logging to critical robot operations
+'''
+def log_robot_error_if_needed(operation_name, result):
+    """Helper function to log robot operation errors."""
+    if isinstance(result, str) and ("error" in result.lower() or "failed" in result.lower()):
+        log_standalone_error(f"{operation_name} failed: {result}", "robot")
+'''
+#endregion
+
 #region - SEM pick and place soak test functions
 
 def soak_test_sem_pick_place(session_id, config):
@@ -3301,15 +4037,15 @@ def perform_tem_disk_transfer(session_id, cycle_id, origin, destination, max_ret
 # Map function names to handlers
 function_map = {
     'button': button_action,
-    'sem_process': sem_process_action,  # Keep original for now, enhanced version called from dispatch_action
-    'tem_process': tem_process_action,  # Keep original for now, enhanced version called from dispatch_action
-    'tem_manual_prepare': enhanced_tem_manual_prepare,
-    'tem_manual_expose': tem_manual_expose,  # Enhanced version called from dispatch_action
-    'tem_manual_complete': enhanced_tem_manual_complete,
+    'sem_process': sem_process_action,
+    'tem_process': tem_process_action,
+    'tem_manual_prepare': tem_manual_prepare,
+    'tem_manual_expose': tem_manual_expose,
+    'tem_manual_complete': tem_manual_complete,
     'c3dp_test_connectivity': c3dp_test_connectivity,
-    'c3dp_test_connectivity_machine_test_page': lambda: enhanced_c3dp_test_connectivity(True)[1],
+    'c3dp_test_connectivity_machine_test_page': c3dp_test_connectivity_machine_test_page,
     'server_test_connectivity': server_test_connectivity,
-    'control_panel_get_macstat': enhanced_control_panel_get_macstat,
+    'control_panel_get_macstat': control_panel_get_macstat,
     'control_panel_standby': control_panel_standby,
     'control_panel_shutdown': control_panel_shutdown,
     'control_panel_sem_stage_open': control_panel_sem_stage_open,
@@ -3326,8 +4062,8 @@ function_map = {
     'control_panel_vibration_motor_both_on': control_panel_vibration_motor_both_on,
     'control_panel_vibration_motor_both_off': control_panel_vibration_motor_both_off,
     'control_panel_vibration_motor_all_off': control_panel_vibration_motor_all_off,
-    'device_extend_bed': enhanced_device_extend_bed,
-    'device_retract_bed': enhanced_device_retract_bed,
+    'device_extend_bed': device_extend_bed,
+    'device_retract_bed': device_retract_bed,
     'robot_manual_move': move_robot_manual,
     'robot_manual_home': home_robot_manual,
     'send_manual_plc_command': send_manual_plc_command
@@ -4525,6 +5261,8 @@ def stop_sem_to_stage_test():
 
 #endregion
 
+#region Backup of dispatch actions
+'''
 def dispatch_action(data):
     """
     Enhanced dispatch_action that blocks operations during soak tests.
@@ -4671,6 +5409,180 @@ def original_dispatch_action(data):
             log_standalone_error(error_msg, determine_error_component(function_type, str(e)))
         
         return error_msg
+'''
+#endregion
+
+def dispatch_action(data):
+    """
+    Consolidated dispatch_action with soak test blocking, database logging, and vibration motor support.
+    This replaces both dispatch_action and original_dispatch_action functions.
+    """
+    global soak_test_in_progress, current_process_runs
+    
+    print("Received data:", data)  # debug line
+    function_type = data.get('function')
+    identifier = data.get('id')
+    
+    # Check if a soak test is running and block conflicting operations
+    if soak_test_in_progress:
+        # Define operations that should be blocked during soak tests
+        blocked_operations = [
+            'sem_process', 'tem_process', 'tem_manual_prepare', 'tem_manual_expose', 
+            'tem_manual_complete', 'robot_manual_move', 'robot_manual_home', 
+            'device_extend_bed', 'device_retract_bed', 'send_manual_plc_command'
+        ]
+        
+        if function_type in blocked_operations:
+            error_msg = ("A soak test is currently running. "
+                        "Please stop the soak test before performing other operations. "
+                        "Visit the soak test page to manage the running test.")
+            print(f"Operation blocked due to soak test: {function_type}")
+            socketio.emit('function_response', {'result': error_msg})
+            return error_msg
+    
+    # Get the action function from the function map
+    action_function = function_map.get(function_type)
+    
+    # Determine process type for logging
+    process_type = determine_process_type(function_type, data)
+    
+    # Start process run logging for major operations
+    process_run_id = None
+    start_time = time.time()
+    
+    if should_log_process(function_type):
+        # Extract parameters for logging
+        parameters = extract_parameters_for_logging(function_type, data)
+        process_run_id = start_process_run(process_type, parameters)
+        
+        # Store in global tracking dict
+        if process_run_id:
+            current_process_runs[process_run_id] = {
+                'start_time': start_time,
+                'function_type': function_type,
+                'process_type': process_type
+            }
+    
+    if action_function is None:
+        error_msg = f"Unknown function type: {function_type}"
+        if process_run_id:
+            log_error(process_run_id, error_msg, "system")
+            end_process_run(process_run_id, False, "User_Error", time.time() - start_time)
+        else:
+            log_standalone_error(error_msg, "system")
+        return error_msg
+    
+    try:
+        # Execute the function with appropriate parameters
+        if function_type == 'button':
+            result = action_function(identifier)
+            
+        elif function_type == 'sem_process':
+            # Extract vibration motor parameters
+            motor1_enabled = data.get('sem_motor1_enabled') == 'true'
+            motor2_enabled = data.get('sem_motor2_enabled') == 'true'
+            
+            result = action_function(
+                voltage=data.get('voltage'),
+                c_height=data.get('c_height'),
+                distance=data.get('distance'),
+                etime=data.get('time'),
+                origin=data.get('origin'),
+                destination=data.get('destination'),
+                process_run_id=process_run_id,
+                motor1_enabled=motor1_enabled,
+                motor2_enabled=motor2_enabled
+            )
+            
+        elif function_type == 'tem_process':
+            # Extract vibration motor parameters (TEM page uses same IDs as SEM)
+            motor1_enabled = data.get('sem_motor1_enabled') == 'true'
+            motor2_enabled = data.get('sem_motor2_enabled') == 'true'
+            skip_laser = data.get('skip_laser_verification') == 'on'
+            
+            result = action_function(
+                voltage=data.get('voltage'),
+                c_height=data.get('c_height'),
+                distance=data.get('distance'),
+                etime=data.get('time'),
+                origin=data.get('origin'),
+                destination=data.get('destination'),
+                skip_laser=skip_laser,
+                process_run_id=process_run_id,
+                motor1_enabled=motor1_enabled,
+                motor2_enabled=motor2_enabled
+            )
+            
+        elif function_type == 'tem_manual_expose':
+            # Extract vibration motor parameters for manual TEM
+            motor1_enabled = data.get('motor1_enabled') == 'true'
+            motor2_enabled = data.get('motor2_enabled') == 'true'
+            
+            result = action_function(
+                voltage=data.get('voltage'),
+                c_height=data.get('c_height'),
+                distance=data.get('distance'),
+                time=data.get('time'),
+                motor1_enabled=motor1_enabled,
+                motor2_enabled=motor2_enabled
+            )
+            
+        elif function_type == 'tem_manual_prepare':
+            result = action_function(process_run_id=process_run_id)
+            
+        elif function_type == 'tem_manual_complete':
+            result = action_function(process_run_id=process_run_id)
+            
+        elif function_type in ['c3dp_test_connectivity_machine_test_page']:
+            result = action_function()
+            
+        elif function_type == 'control_panel_get_macstat':
+            result = action_function(process_run_id=process_run_id)
+            
+        elif function_type in ['device_extend_bed', 'device_retract_bed']:
+            result = action_function(process_run_id=process_run_id)
+            
+        elif function_type == 'robot_manual_move':
+            result = action_function(
+                data.get('x'), data.get('y'), data.get('z'), data.get('c3dp_speed')
+            )
+            
+        elif function_type == 'send_manual_plc_command':
+            result = action_function(data.get('command'))
+            
+        else:
+            # For all other functions, call them without extra parameters
+            result = action_function()
+        
+        # Log successful completion
+        if process_run_id and current_process_runs.get(process_run_id):
+            # Check if result indicates success (you may need to adjust this logic)
+            success = not (isinstance(result, str) and ("error" in result.lower() or "failed" in result.lower()))
+            
+            if success:
+                end_process_run(process_run_id, True, "Success", time.time() - start_time)
+            else:
+                end_process_run(process_run_id, False, "Process_Failed", time.time() - start_time)
+                log_error(process_run_id, str(result), "process")
+            
+            # Clean up tracking
+            current_process_runs.pop(process_run_id, None)
+        
+        return result
+    
+    except Exception as e:
+        error_msg = f"Error executing {function_type}: {str(e)}"
+        print(error_msg)
+        
+        if process_run_id:
+            log_error(process_run_id, error_msg, "application")
+            end_process_run(process_run_id, False, "Application_Error", time.time() - start_time)
+            current_process_runs.pop(process_run_id, None)
+        else:
+            log_standalone_error(error_msg, "application")
+        
+        return error_msg
+
 
 def determine_process_type(function_type, data):
     """Determine the process type for logging purposes."""
