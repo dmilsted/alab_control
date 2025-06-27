@@ -701,6 +701,7 @@ def get_time_ago(dt):
     else:
         return "Just now"
 
+#region - Position and system check
 def create_position_tracking_tables():
     """Create tables for tracking SEM and TEM positions and system state."""
     try:
@@ -972,6 +973,7 @@ def update_position_status(position_name, status, position_type='tem'):
     except Exception as e:
         print(f"Error updating position {position_name}: {e}")
         return False
+#endregion
 
 #region Soak test functions
 

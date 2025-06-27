@@ -27,6 +27,11 @@ from database import (
     create_position_tracking_tables,
     initialize_sem_positions,
     initialize_tem_positions,
+    get_system_state,
+    get_sem_positions,
+    get_tem_positions,
+    clear_sem_positions,
+    clear_tem_positions,
     init_soak_test_database,
     create_soak_test_session,
     update_soak_test_session,
@@ -1962,6 +1967,119 @@ def control_panel_get_macstat(process_run_id=None):
             log_standalone_error(error_msg, "PLC")
         
         return error_msg
+    
+#region - State check and Position availability functions
+
+# Global variable to track current operation
+current_remote_operation = None
+
+def state_check():
+    """
+    Check the current state of the machine for remote monitoring.
+    Returns: JSON string with state information
+    """
+    try:
+        # Check if any process is currently running
+        global current_process_runs, current_remote_operation
+        
+        if current_process_runs or current_remote_operation:
+            # System is running an operation
+            operation_info = {}
+            if current_remote_operation:
+                operation_info['current_operation'] = current_remote_operation
+            if current_process_runs:
+                operation_info['active_processes'] = list(current_process_runs.values())
+            
+            result = {
+                'status': 'running',
+                'details': operation_info,
+                'timestamp': datetime.now().isoformat()
+            }
+        else:
+            # Get the last known state from database
+            system_state = get_system_state()
+            
+            if system_state['last_error_message']:
+                result = {
+                    'status': 'error',
+                    'last_operation': system_state['last_operation'],
+                    'error_message': system_state['last_error_message'],
+                    'timestamp': system_state['last_updated']
+                }
+            else:
+                result = {
+                    'status': 'idle',
+                    'last_operation': system_state['last_operation'],
+                    'timestamp': system_state['last_updated']
+                }
+        
+        return json.dumps(result)
+        
+    except Exception as e:
+        error_result = {
+            'status': 'error',
+            'error_message': f"State check failed: {str(e)}",
+            'timestamp': datetime.now().isoformat()
+        }
+        return json.dumps(error_result)
+
+def get_sem_position_status():
+    """Get SEM position status for remote monitoring."""
+    try:
+        positions = get_sem_positions()
+        result = {
+            'type': 'sem_positions',
+            'positions': positions,
+            'timestamp': datetime.now().isoformat()
+        }
+        return json.dumps(result)
+    except Exception as e:
+        error_result = {
+            'type': 'error',
+            'message': f"Failed to get SEM positions: {str(e)}",
+            'timestamp': datetime.now().isoformat()
+        }
+        return json.dumps(error_result)
+
+def get_tem_position_status():
+    """Get TEM position status for remote monitoring."""
+    try:
+        positions = get_tem_positions()
+        result = {
+            'type': 'tem_positions',
+            'positions': positions,
+            'timestamp': datetime.now().isoformat()
+        }
+        return json.dumps(result)
+    except Exception as e:
+        error_result = {
+            'type': 'error',
+            'message': f"Failed to get TEM positions: {str(e)}",
+            'timestamp': datetime.now().isoformat()
+        }
+        return json.dumps(error_result)
+
+def clear_sem_memory():
+    """Clear SEM position memory."""
+    try:
+        if clear_sem_positions():
+            return "SUCCESS: SEM position memory cleared"
+        else:
+            return "ERROR: Failed to clear SEM position memory"
+    except Exception as e:
+        return f"ERROR: {str(e)}"
+
+def clear_tem_memory():
+    """Clear TEM position memory."""
+    try:
+        if clear_tem_positions():
+            return "SUCCESS: TEM position memory cleared"
+        else:
+            return "ERROR: Failed to clear TEM position memory"
+    except Exception as e:
+        return f"ERROR: {str(e)}"
+
+#endregion
 
 #region - SEM pick and place soak test functions
 
@@ -3806,7 +3924,6 @@ def calculate_summary_stats(success_rates, error_categories):
         'avg_duration': avg_duration
     }
 
-# Keep the existing API routes for programmatic access
 @app.route('/api/stats/success-rates')
 def api_success_rates():
     """API endpoint for success rates."""
