@@ -45,40 +45,56 @@ window.positionManager = {
                 try {
                     let positions = {};
                     
-                    // Check if it's the pipe-separated format
+                    // Check if it's the pipe-separated format like: "SEM|Last change:2025-06-27_03:37|A1:empty|A2:occupied|..."
                     if (typeof data.message === 'string' && data.message.includes('|')) {
-                        // Parse the pipe-separated format: "SEM|Last change:...|A1:empty|A2:occupied|..."
+                        console.log('Parsing pipe-separated format:', data.message);
+                        
+                        // Parse the pipe-separated format
                         const parts = data.message.split('|');
                         
-                        for (let i = 2; i < parts.length; i++) { // Skip first two parts (SEM and timestamp)
-                            const [positionName, status] = parts[i].split(':');
-                            if (positionName && status) {
-                                // Determine if it's a tray or stage position
-                                let positionType = 'tray';
-                                if (positionName.startsWith('PH_STUB_') || positionName.startsWith('PH_Z')) {
-                                    positionType = 'stage';
-                                }
-                                
-                                // Only include actual sample holder positions (skip Z positions)
-                                if (!positionName.includes('_Z')) {
-                                    positions[positionName] = {
-                                        type: positionType,
-                                        status: status,
-                                        last_updated: new Date().toISOString()
-                                    };
+                        for (let i = 2; i < parts.length; i++) { // Skip first two parts (SEM/TEM and timestamp)
+                            const positionPart = parts[i];
+                            if (positionPart && positionPart.includes(':')) {
+                                const [positionName, status] = positionPart.split(':');
+                                if (positionName && status) {
+                                    // Determine if it's a tray or stage position
+                                    let positionType = 'tray';
+                                    if (positionName.startsWith('PH_STUB_') || positionName.startsWith('PH_Z')) {
+                                        positionType = 'stage';
+                                    }
+                                    
+                                    // Only include actual sample holder positions (skip Z positions and STRAY positions)
+                                    if (!positionName.includes('_Z') && !positionName.startsWith('STRAY_')) {
+                                        positions[positionName] = {
+                                            type: positionType,
+                                            status: status,
+                                            last_updated: new Date().toISOString()
+                                        };
+                                        console.log(`Parsed position: ${positionName} = ${status} (${positionType})`);
+                                    }
                                 }
                             }
                         }
-                    } else {
+                    } else if (typeof data.message === 'string') {
                         // Try to parse as JSON (fallback for other formats)
-                        const response = JSON.parse(data.message);
-                        
-                        if (response.type && response.positions) {
-                            // Remote monitoring format: {type: "sem_positions", positions: {...}}
-                            positions = response.positions;
-                        } else {
-                            // Direct format: {A1: {type: "tray", status: "clean"}, ...}
-                            positions = response;
+                        try {
+                            const response = JSON.parse(data.message);
+                            
+                            if (response.type && response.positions) {
+                                // Remote monitoring format: {type: "sem_positions", positions: {...}}
+                                positions = response.positions;
+                            } else {
+                                // Direct format: {A1: {type: "tray", status: "clean"}, ...}
+                                positions = response;
+                            }
+                        } catch (jsonError) {
+                            console.error('Failed to parse as JSON:', jsonError);
+                            return {};
+                        }
+                    } else {
+                        // If it's already an object, handle it directly
+                        if (data.message && typeof data.message === 'object') {
+                            positions = data.message;
                         }
                     }
                     
@@ -116,7 +132,7 @@ window.positionManager = {
     },
 
     updateSEMTrayColors(positions) {
-        console.log('Updating SEM tray colors');
+        console.log('Updating SEM tray colors with currentSelections:', this.currentSelections);
         Object.keys(positions).forEach(positionName => {
             const positionData = positions[positionName];
             
@@ -124,6 +140,12 @@ window.positionManager = {
             if (positionData.type === 'tray') {
                 const circle = document.getElementById(positionName);
                 if (circle) {
+                    // Skip only if this is the CURRENT selection (after we update currentSelections)
+                    if (positionName === this.currentSelections.semOrigin) {
+                        console.log(`Skipping color update for currently selected position: ${positionName}`);
+                        return;
+                    }
+                    
                     const color = this.colorScheme[positionData.status] || this.colorScheme.unavailable;
                     circle.setAttribute('fill', color);
                     console.log(`Updated ${positionName} to ${positionData.status} (${color})`);
@@ -144,7 +166,7 @@ window.positionManager = {
     },
 
     updateSEMStageColors(positions) {
-        console.log('Updating SEM stage colors');
+        console.log('Updating SEM stage colors with currentSelections:', this.currentSelections);
         Object.keys(positions).forEach(positionName => {
             const positionData = positions[positionName];
             
@@ -152,6 +174,12 @@ window.positionManager = {
                 // Update origin tray circles (semTrayContainer)
                 const circle = document.getElementById(positionName);
                 if (circle) {
+                    // Skip only if this is the CURRENT selection (after we update currentSelections)
+                    if (positionName === this.currentSelections.semOrigin) {
+                        console.log(`Skipping color update for currently selected origin: ${positionName}`);
+                        return;
+                    }
+                    
                     const color = this.colorScheme[positionData.status] || this.colorScheme.unavailable;
                     circle.setAttribute('fill', color);
                     
@@ -165,18 +193,23 @@ window.positionManager = {
                 }
             } else if (positionData.type === 'stage') {
                 // Update destination stage positions (stageContainer)
-                // Convert PH_STUB_X format to stg_x format for SVG IDs
                 let stageId;
                 if (positionName.startsWith('PH_STUB_')) {
                     const stageName = positionName.replace('PH_STUB_', '').toLowerCase();
                     stageId = `stg_${stageName}`;
                 } else {
-                    stageId = positionName; // In case it's already in the right format
+                    stageId = positionName;
                 }
                 
                 const stageElement = document.getElementById(stageId);
                 
                 if (stageElement) {
+                    // Skip only if this is the CURRENT selection (after we update currentSelections)
+                    if (positionName === this.currentSelections.semDestination) {
+                        console.log(`Skipping color update for currently selected destination: ${positionName}`);
+                        return;
+                    }
+                    
                     // Check if this is a permanently forbidden position (hardware limitation)
                     const isPermanentlyForbidden = stageElement.classList.contains('forbidden-position');
                     
@@ -214,12 +247,19 @@ window.positionManager = {
     },
 
     updateTEMTrayColors(positions) {
-        console.log('Updating TEM tray colors');
+        console.log('Updating TEM tray colors with currentSelections:', this.currentSelections);
         Object.keys(positions).forEach(positionName => {
             const positionData = positions[positionName];
             const rect = document.getElementById(positionName);
             
             if (rect) {
+                // Skip only if this is the CURRENT selection (after we update currentSelections)
+                if (positionName === this.currentSelections.temOrigin || 
+                    positionName === this.currentSelections.temDestination) {
+                    console.log(`Skipping color update for currently selected position: ${positionName}`);
+                    return;
+                }
+                
                 const color = this.colorScheme[positionData.status] || this.colorScheme.unavailable;
                 rect.setAttribute('fill', color);
                 
@@ -274,91 +314,118 @@ window.positionManager = {
     // Update dropdown options based on availability
     updateDropdownOptions(systemType, pageType) {
         const positions = this.positions[systemType];
+        console.log('Updating dropdown options for', systemType, pageType);
         
-        if (pageType === 'tray' && systemType === 'sem') {
-            const originSelect = document.getElementById('origin');
-            if (originSelect) {
-                // Enable/disable options based on availability
-                Array.from(originSelect.options).forEach(option => {
-                    if (option.value && positions[option.value]) {
-                        const positionData = positions[option.value];
-                        if (positionData.type === 'tray') {
-                            if (positionData.status === 'clean') {
-                                option.disabled = false;
-                                option.style.color = 'black';
-                            } else {
-                                option.disabled = true;
-                                option.style.color = 'gray';
-                                option.title = `Position ${option.value} is ${positionData.status} - not available for selection`;
-                            }
-                        }
-                    }
-                });
+        if (pageType === 'tray') {
+            if (systemType === 'sem') {
+                // SEM Tray page - filter origin dropdown
+                const originSelect = document.getElementById('origin');
+                if (originSelect) {
+                    this.filterDropdownOptions(originSelect, positions, 'tray', 'clean');
+                }
+            } else if (systemType === 'tem') {
+                // TEM Tray page - filter both dropdowns  
+                const originSelect = document.getElementById('origin');
+                const destinationSelect = document.getElementById('destination');
+                
+                if (originSelect) {
+                    // Origin: only show clean TC positions
+                    this.filterDropdownOptions(originSelect, positions, 'origin', 'clean');
+                }
+                
+                if (destinationSelect) {
+                    // Destination: only show empty TE positions
+                    this.filterDropdownOptions(destinationSelect, positions, 'destination', 'empty');
+                }
             }
         } else if (pageType === 'stage' && systemType === 'sem') {
-            // Update both origin and destination dropdowns for stage page
+            // SEM Stage page - filter both dropdowns
             const originSelect = document.getElementById('origin');
             const destinationSelect = document.getElementById('destination');
             
             if (originSelect) {
-                // Enable/disable origin options (tray positions)
-                Array.from(originSelect.options).forEach(option => {
-                    if (option.value && positions[option.value]) {
-                        const positionData = positions[option.value];
-                        if (positionData.type === 'tray') {
-                            if (positionData.status === 'clean') {
-                                option.disabled = false;
-                                option.style.color = 'black';
-                            } else {
-                                option.disabled = true;
-                                option.style.color = 'gray';
-                                option.title = `Position ${option.value} is ${positionData.status} - not available for pickup`;
-                            }
-                        }
-                    }
-                });
+                // Origin: only show clean tray positions
+                this.filterDropdownOptions(originSelect, positions, 'tray', 'clean');
             }
             
             if (destinationSelect) {
-                // Enable/disable destination options (stage positions)
-                Array.from(destinationSelect.options).forEach(option => {
-                    if (option.value) {
-                        // Check if position exists in database
-                        if (positions[option.value]) {
-                            const positionData = positions[option.value];
-                            if (positionData.type === 'stage') {
-                                if (positionData.status === 'empty') {
-                                    option.disabled = false;
-                                    option.style.color = 'black';
-                                } else {
-                                    option.disabled = true;
-                                    option.style.color = 'gray';
-                                    option.title = `Position ${option.value} is ${positionData.status} - not available for placement`;
-                                }
-                            }
-                        } else {
-                            // Position not in database - check if it's permanently forbidden in HTML
-                            const positionValue = option.value.replace('PH_STUB_', '').toLowerCase();
-                            const stageId = `stg_${positionValue}`;
-                            const stageElement = document.getElementById(stageId);
-                            
-                            if (stageElement && stageElement.classList.contains('forbidden-position')) {
-                                // Permanently forbidden position
-                                option.disabled = true;
-                                option.style.color = 'red';
-                                option.title = `Position ${option.value} is permanently unavailable - hardware limitation`;
-                            }
-                        }
-                    }
-                });
+                // Destination: only show empty stage positions
+                this.filterDropdownOptions(destinationSelect, positions, 'stage', 'empty');
             }
         }
+    },
+
+    // New helper function to filter dropdown options
+    filterDropdownOptions(selectElement, positions, positionType, requiredStatus) {
+        Array.from(selectElement.options).forEach(option => {
+            if (!option.value) {
+                // Keep the default "Select..." option
+                return;
+            }
+            
+            const positionData = positions[option.value];
+            let shouldShow = false;
+            
+            if (positionData) {
+                // Check if position matches our filtering criteria
+                if (positionType === 'origin') {
+                    // TEM origin: show TC positions that are clean
+                    shouldShow = option.value.startsWith('TC') && positionData.status === requiredStatus;
+                } else if (positionType === 'destination') {
+                    // TEM destination: show TE positions that are empty
+                    shouldShow = option.value.startsWith('TE') && positionData.status === requiredStatus;
+                } else if (positionType === 'tray') {
+                    // SEM tray positions: show clean positions
+                    shouldShow = positionData.type === 'tray' && positionData.status === requiredStatus;
+                } else if (positionType === 'stage') {
+                    // SEM stage positions: show empty positions
+                    shouldShow = positionData.type === 'stage' && positionData.status === requiredStatus;
+                }
+            } else {
+                // Position not in database - check for permanently forbidden stage positions
+                if (positionType === 'stage') {
+                    const stageId = option.value.startsWith('PH_STUB_') 
+                        ? `stg_${option.value.replace('PH_STUB_', '').toLowerCase()}`
+                        : option.value;
+                    const stageElement = document.getElementById(stageId);
+                    
+                    if (stageElement && stageElement.classList.contains('forbidden-position')) {
+                        shouldShow = false; // Hide permanently forbidden positions
+                    } else {
+                        shouldShow = false; // Hide unknown positions by default
+                    }
+                } else {
+                    shouldShow = false; // Hide unknown positions
+                }
+            }
+            
+            // Show/hide the option
+            if (shouldShow) {
+                option.style.display = '';
+                option.disabled = false;
+                option.style.color = 'black';
+            } else {
+                option.style.display = 'none'; // Actually hide instead of just disabling
+                option.disabled = true;
+            }
+        });
+        
+        console.log(`Filtered ${selectElement.id} dropdown for ${positionType} positions with status ${requiredStatus}`);
     }
 };
 
 // Page initialization function that gets called after content loads
 window.initializePositionSystem = async function() {
     console.log('Initializing position system...');
+    
+    // IMPORTANT: Reset all current selections on page load
+    window.positionManager.currentSelections = {
+        semOrigin: null,
+        semDestination: null,
+        temOrigin: null,
+        temDestination: null
+    };
+    console.log('Reset all current selections to null');
     
     // Wait a bit for DOM to be ready
     setTimeout(async () => {
@@ -379,50 +446,30 @@ window.initializePositionSystem = async function() {
             console.log('Detected TEM Tray page');
             await window.positionManager.fetchPositions('tem');
             window.positionManager.updateSVGColors('tem', 'tray');
+            window.positionManager.updateDropdownOptions('tem', 'tray');
             
         } else {
             console.log('No position system detected on this page');
         }
     }, 500);
     
-    // Add event listeners to dropdowns since we removed onchange from HTML
+    // Add event listeners to dropdowns - SIMPLIFIED VERSION ONLY
     setTimeout(() => {
         const originSelect = document.getElementById('origin');
         const destinationSelect = document.getElementById('destination');
         
         if (originSelect) {
-            originSelect.addEventListener('change', function() {
+            // Remove any existing event listeners first
+            originSelect.removeEventListener('change', originSelect._changeHandler);
+            
+            // Add new clean event listener
+            const originChangeHandler = function() {
                 console.log('Origin dropdown changed to:', this.value);
                 
-                // Determine which page we're on and call appropriate function
+                // Just call the appropriate enhanced function - don't duplicate logic
                 if (document.getElementById('stageContainer')) {
-                    // SEM Stage page - origin tray selection
-                    // First clear the previous selection if it exists
-                    if (window.positionManager.currentSelections.semOrigin) {
-                        const prevElement = document.getElementById(window.positionManager.currentSelections.semOrigin);
-                        if (prevElement) {
-                            prevElement.setAttribute('fill', 'white');
-                            prevElement.style.fill = 'white';
-                        }
-                    }
-                    
-                    // Then apply status colors
-                    if (window.positionManager.positions.sem) {
-                        window.positionManager.updateSVGColors('sem', 'stage');
-                    }
-                    
-                    // Finally highlight the selection
-                    if (this.value) {
-                        const selectedCircle = document.getElementById(this.value);
-                        if (selectedCircle) {
-                            selectedCircle.setAttribute('fill', window.positionManager.colorScheme.selected);
-                            selectedCircle.style.fill = window.positionManager.colorScheme.selected;
-                        }
-                        // Store the current selection
-                        window.positionManager.currentSelections.semOrigin = this.value;
-                    } else {
-                        window.positionManager.currentSelections.semOrigin = null;
-                    }
+                    // SEM Stage page
+                    window.enhancedSEMOriginChange(this);
                 } else if (document.querySelector('rect[id^="TC"]')) {
                     // TEM Tray page
                     window.enhancedTEMOriginChange(this);
@@ -430,21 +477,32 @@ window.initializePositionSystem = async function() {
                     // SEM Tray page
                     window.enhancedSEMOriginChange(this);
                 }
-            });
+            };
+            
+            originSelect.addEventListener('change', originChangeHandler);
+            originSelect._changeHandler = originChangeHandler; // Store reference for cleanup
         }
         
         if (destinationSelect) {
-            destinationSelect.addEventListener('change', function() {
+            // Remove any existing event listeners first
+            destinationSelect.removeEventListener('change', destinationSelect._changeHandler);
+            
+            // Add new clean event listener
+            const destinationChangeHandler = function() {
                 console.log('Destination dropdown changed to:', this.value);
                 
+                // Just call the appropriate enhanced function - don't duplicate logic
                 if (document.getElementById('stageContainer')) {
-                    // SEM Stage page - destination stage selection
+                    // SEM Stage page
                     window.enhancedSEMDestinationChange(this);
                 } else if (document.querySelector('rect[id^="TC"]')) {
-                    // TEM page
+                    // TEM Tray page
                     window.enhancedTEMDestinationChange(this);
                 }
-            });
+            };
+            
+            destinationSelect.addEventListener('change', destinationChangeHandler);
+            destinationSelect._changeHandler = destinationChangeHandler; // Store reference for cleanup
         }
     }, 600);
 };
@@ -465,26 +523,29 @@ window.refreshPositions = async function() {
     }
 };
 
-// Enhanced dropdown change handlers - these are now the ONLY functions!
+// Enhanced dropdown change handlers - EXPLICIT RESTORATION APPROACH
 window.enhancedSEMOriginChange = function(selectElement) {
     console.log('enhancedSEMOriginChange called with:', selectElement.value);
     const selectedValue = selectElement.value;
+    const previousSelection = window.positionManager.currentSelections.semOrigin;
     
-    // First, clear the previous selection if it exists
-    if (window.positionManager.currentSelections.semOrigin) {
-        const prevElement = document.getElementById(window.positionManager.currentSelections.semOrigin);
+    // STEP 1: Explicitly restore the previous selection's color if it exists
+    if (previousSelection && window.positionManager.positions.sem && window.positionManager.positions.sem[previousSelection]) {
+        const prevElement = document.getElementById(previousSelection);
         if (prevElement) {
-            prevElement.setAttribute('fill', 'white');
-            prevElement.style.fill = 'white';
+            const prevPositionData = window.positionManager.positions.sem[previousSelection];
+            const originalColor = window.positionManager.colorScheme[prevPositionData.status] || window.positionManager.colorScheme.unavailable;
+            
+            prevElement.setAttribute('fill', originalColor);
+            prevElement.style.fill = originalColor;
+            console.log(`Restored previous selection ${previousSelection} to ${prevPositionData.status} color (${originalColor})`);
         }
     }
     
-    // Apply our position-based colors to restore status colors
-    if (window.positionManager.positions.sem) {
-        window.positionManager.updateSVGColors('sem', 'tray');
-    }
+    // STEP 2: Update current selection tracking
+    window.positionManager.currentSelections.semOrigin = selectedValue;
     
-    // Highlight the new selected position with our gold color
+    // STEP 3: Highlight the new selected position (if any)
     if (selectedValue) {
         const selectedCircle = document.getElementById(selectedValue);
         if (selectedCircle) {
@@ -492,10 +553,6 @@ window.enhancedSEMOriginChange = function(selectElement) {
             selectedCircle.style.fill = window.positionManager.colorScheme.selected;
             console.log('Highlighted', selectedValue, 'with gold color');
         }
-        // Store the current selection
-        window.positionManager.currentSelections.semOrigin = selectedValue;
-    } else {
-        window.positionManager.currentSelections.semOrigin = null;
     }
     
     // Update hidden destination field if it exists (for SEM tray page)
@@ -508,25 +565,34 @@ window.enhancedSEMOriginChange = function(selectElement) {
 window.enhancedSEMDestinationChange = function(selectElement) {
     console.log('enhancedSEMDestinationChange called with:', selectElement.value);
     const selectedValue = selectElement.value;
+    const previousSelection = window.positionManager.currentSelections.semDestination;
     
-    // First, clear the previous stage selection if it exists
-    if (window.positionManager.currentSelections.semDestination) {
-        const prevStageId = window.positionManager.currentSelections.semDestination.startsWith('PH_STUB_') 
-            ? `stg_${window.positionManager.currentSelections.semDestination.replace('PH_STUB_', '').toLowerCase()}`
-            : window.positionManager.currentSelections.semDestination;
+    // STEP 1: Explicitly restore the previous selection's color if it exists
+    if (previousSelection && window.positionManager.positions.sem && window.positionManager.positions.sem[previousSelection]) {
+        // Convert to stage ID format
+        let prevStageId;
+        if (previousSelection.startsWith('PH_STUB_')) {
+            const stageName = previousSelection.replace('PH_STUB_', '').toLowerCase();
+            prevStageId = `stg_${stageName}`;
+        } else {
+            prevStageId = previousSelection;
+        }
+        
         const prevElement = document.getElementById(prevStageId);
         if (prevElement && !prevElement.classList.contains('forbidden-position')) {
-            prevElement.setAttribute('fill', 'white');
-            prevElement.style.fill = 'white';
+            const prevPositionData = window.positionManager.positions.sem[previousSelection];
+            const originalColor = window.positionManager.colorScheme[prevPositionData.status] || window.positionManager.colorScheme.unavailable;
+            
+            prevElement.setAttribute('fill', originalColor);
+            prevElement.style.fill = originalColor;
+            console.log(`Restored previous selection ${previousSelection} (${prevStageId}) to ${prevPositionData.status} color (${originalColor})`);
         }
     }
     
-    // Apply position-based colors to restore status colors
-    if (window.positionManager.positions.sem) {
-        window.positionManager.updateSVGColors('sem', 'stage');
-    }
+    // STEP 2: Update current selection tracking
+    window.positionManager.currentSelections.semDestination = selectedValue;
     
-    // Highlight the new selected stage position with our gold color
+    // STEP 3: Highlight the new selected stage position
     if (selectedValue) {
         // Convert PH_STUB_X to stg_x format
         let stageId;
@@ -548,35 +614,37 @@ window.enhancedSEMDestinationChange = function(selectElement) {
                 console.log('Highlighted stage', stageId, 'with gold color');
             } else {
                 alert("This position is not available for selection - hardware limitation.");
+                // Reset the selection back to previous
+                window.positionManager.currentSelections.semDestination = previousSelection;
+                selectElement.value = previousSelection || '';
                 return;
             }
         }
-        // Store the current selection
-        window.positionManager.currentSelections.semDestination = selectedValue;
-    } else {
-        window.positionManager.currentSelections.semDestination = null;
     }
 };
 
 window.enhancedTEMOriginChange = function(selectElement) {
     console.log('enhancedTEMOriginChange called with:', selectElement.value);
     const selectedValue = selectElement.value;
+    const previousSelection = window.positionManager.currentSelections.temOrigin;
     
-    // First, clear the previous origin selection if it exists
-    if (window.positionManager.currentSelections.temOrigin) {
-        const prevElement = document.getElementById(window.positionManager.currentSelections.temOrigin);
+    // STEP 1: Explicitly restore the previous selection's color if it exists
+    if (previousSelection && window.positionManager.positions.tem && window.positionManager.positions.tem[previousSelection]) {
+        const prevElement = document.getElementById(previousSelection);
         if (prevElement) {
-            prevElement.setAttribute('fill', 'white');
-            prevElement.style.fill = 'white';
+            const prevPositionData = window.positionManager.positions.tem[previousSelection];
+            const originalColor = window.positionManager.colorScheme[prevPositionData.status] || window.positionManager.colorScheme.unavailable;
+            
+            prevElement.setAttribute('fill', originalColor);
+            prevElement.style.fill = originalColor;
+            console.log(`Restored previous TEM origin selection ${previousSelection} to ${prevPositionData.status} color (${originalColor})`);
         }
     }
     
-    // Apply position-based colors to restore status colors
-    if (window.positionManager.positions.tem) {
-        window.positionManager.updateSVGColors('tem', 'tray');
-    }
+    // STEP 2: Update current selection tracking
+    window.positionManager.currentSelections.temOrigin = selectedValue;
     
-    // Highlight selected origin with GOLD (for clean TC positions)
+    // STEP 3: Highlight selected origin with GOLD (for clean TC positions)
     if (selectedValue) {
         const selectedRect = document.getElementById(selectedValue);
         if (selectedRect) {
@@ -584,32 +652,31 @@ window.enhancedTEMOriginChange = function(selectElement) {
             selectedRect.style.fill = window.positionManager.colorScheme.selected;
             console.log('Highlighted TEM origin', selectedValue, 'with gold color');
         }
-        // Store the current selection
-        window.positionManager.currentSelections.temOrigin = selectedValue;
-    } else {
-        window.positionManager.currentSelections.temOrigin = null;
     }
 };
 
 window.enhancedTEMDestinationChange = function(selectElement) {
     console.log('enhancedTEMDestinationChange called with:', selectElement.value);
     const selectedValue = selectElement.value;
+    const previousSelection = window.positionManager.currentSelections.temDestination;
     
-    // First, clear the previous destination selection if it exists
-    if (window.positionManager.currentSelections.temDestination) {
-        const prevElement = document.getElementById(window.positionManager.currentSelections.temDestination);
+    // STEP 1: Explicitly restore the previous selection's color if it exists
+    if (previousSelection && window.positionManager.positions.tem && window.positionManager.positions.tem[previousSelection]) {
+        const prevElement = document.getElementById(previousSelection);
         if (prevElement) {
-            prevElement.setAttribute('fill', 'white');
-            prevElement.style.fill = 'white';
+            const prevPositionData = window.positionManager.positions.tem[previousSelection];
+            const originalColor = window.positionManager.colorScheme[prevPositionData.status] || window.positionManager.colorScheme.unavailable;
+            
+            prevElement.setAttribute('fill', originalColor);
+            prevElement.style.fill = originalColor;
+            console.log(`Restored previous TEM destination selection ${previousSelection} to ${prevPositionData.status} color (${originalColor})`);
         }
     }
     
-    // Apply position-based colors to restore status colors
-    if (window.positionManager.positions.tem) {
-        window.positionManager.updateSVGColors('tem', 'tray');
-    }
+    // STEP 2: Update current selection tracking  
+    window.positionManager.currentSelections.temDestination = selectedValue;
     
-    // Highlight selected destination with LIGHT BLUE (for TE positions)
+    // STEP 3: Highlight selected destination with LIGHT BLUE (for TE positions)
     if (selectedValue) {
         const selectedRect = document.getElementById(selectedValue);
         if (selectedRect) {
@@ -617,9 +684,5 @@ window.enhancedTEMDestinationChange = function(selectElement) {
             selectedRect.style.fill = window.positionManager.colorScheme.selectedDestination;
             console.log('Highlighted TEM destination', selectedValue, 'with light blue color');
         }
-        // Store the current selection
-        window.positionManager.currentSelections.temDestination = selectedValue;
-    } else {
-        window.positionManager.currentSelections.temDestination = null;
     }
 };
