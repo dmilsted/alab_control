@@ -913,17 +913,27 @@ def get_tem_positions():
         return {}
 
 def clear_sem_positions():
-    """Reset all SEM positions to empty."""
+    """Reset SEM positions to fresh tray state - tray positions get clean stubs, stage positions become empty."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             
+            # Set tray positions to 'clean_stub' (fresh tray installed)
+            cursor.execute("""
+                UPDATE sem_positions 
+                SET status = 'clean_stub', last_updated = ?
+                WHERE position_type = 'tray'
+            """, (datetime.now(),))
+            
+            # Set stage positions to 'empty' (stages start empty)
             cursor.execute("""
                 UPDATE sem_positions 
                 SET status = 'empty', last_updated = ?
+                WHERE position_type = 'stage'
             """, (datetime.now(),))
             
             conn.commit()
+            print("SEM positions reset: tray positions -> clean_stub, stage positions -> empty")
             return True
             
     except Exception as e:
@@ -931,17 +941,41 @@ def clear_sem_positions():
         return False
 
 def clear_tem_positions():
-    """Reset all TEM positions to empty."""
+    """Reset TEM positions to fresh tray state - clean disk positions get clean disks, used positions become empty."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             
-            cursor.execute("""
-                UPDATE tem_positions 
-                SET status = 'empty', last_updated = ?
-            """, (datetime.now(),))
+            # Get position names from CSV files to determine which are clean vs used disk positions
+            from app import SamplePrepEnder3
+            
+            clean_disk_positions = list(SamplePrepEnder3.clean_disk_pos.keys()) if hasattr(SamplePrepEnder3, 'clean_disk_pos') else []
+            used_disk_positions = list(SamplePrepEnder3.used_disk_pos.keys()) if hasattr(SamplePrepEnder3, 'used_disk_pos') else []
+            
+            # Remove Z-level position names (they're not actual holder positions)
+            clean_disk_positions = [pos for pos in clean_disk_positions if not pos.startswith('TCTRAY_Z')]
+            used_disk_positions = [pos for pos in used_disk_positions if not pos.startswith('TCTRAY_Z')]
+            
+            # Set clean disk positions to 'clean_disk' (fresh clean disk tray installed)
+            if clean_disk_positions:
+                placeholders = ','.join(['?' for _ in clean_disk_positions])
+                cursor.execute(f"""
+                    UPDATE tem_positions 
+                    SET status = 'clean_disk', last_updated = ?
+                    WHERE position_name IN ({placeholders})
+                """, [datetime.now()] + clean_disk_positions)
+            
+            # Set used disk positions to 'empty' (used disk storage starts empty)
+            if used_disk_positions:
+                placeholders = ','.join(['?' for _ in used_disk_positions])
+                cursor.execute(f"""
+                    UPDATE tem_positions 
+                    SET status = 'empty', last_updated = ?
+                    WHERE position_name IN ({placeholders})
+                """, [datetime.now()] + used_disk_positions)
             
             conn.commit()
+            print("TEM positions reset: clean disk positions -> clean_disk, used disk positions -> empty")
             return True
             
     except Exception as e:
@@ -973,6 +1007,56 @@ def update_position_status(position_name, status, position_type='tem'):
     except Exception as e:
         print(f"Error updating position {position_name}: {e}")
         return False
+
+def get_last_process_result():
+    """
+    Get the most recent process run result, regardless of success or failure.
+    
+    Returns:
+        dict: Process information if found, None otherwise
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Get the most recent process run with any associated error details
+            cursor.execute("""
+                SELECT 
+                    pr.id, 
+                    pr.timestamp, 
+                    pr.process_type,
+                    pr.success,
+                    pr.error_category,
+                    pr.duration_seconds,
+                    pr.parameters,
+                    ed.error_message,
+                    ed.component
+                FROM process_runs pr
+                LEFT JOIN error_details ed ON pr.id = ed.process_run_id
+                ORDER BY pr.timestamp DESC
+                LIMIT 1
+            """)
+            
+            result = cursor.fetchone()
+            if result:
+                return {
+                    'process_run_id': result[0],
+                    'timestamp': result[1],
+                    'process_type': result[2],
+                    'success': bool(result[3]),
+                    'error_category': result[4],
+                    'duration_seconds': result[5],
+                    'parameters': result[6],
+                    'error_message': result[7],
+                    'component': result[8]
+                }
+            
+            return None
+            
+    except Exception as e:
+        print(f"Error getting last process result: {e}")
+        return None
+
 #endregion
 
 #region Soak test functions

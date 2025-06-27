@@ -2,6 +2,39 @@
     <h1 class="main-title">Machine Test</h1>
 </div>
 <div class="form-card">
+    <h2 class="main-subtitle">Sample Holder Management</h2>
+    <div class="usage-notes" style="margin-bottom: 15px;">
+        <p><strong>Instructions:</strong> Use these buttons when you install fresh sample trays to reset position tracking.</p>
+        <ul>
+            <li><strong>Refresh SEM Trays:</strong> Resets all tray positions to "clean_stub" and stage positions to "empty"</li>
+            <li><strong>Refresh TEM Trays:</strong> Resets clean disk positions to "clean_disk" and used positions to "empty"</li>
+        </ul>
+        <p><em>Note: Only use these buttons when you have physically replaced trays with fresh samples.</em></p>
+    </div>
+    <div class="button-group">
+        <button class="btn btn-primary" data-function="clear_sem_memory" id="refresh-sem-btn">
+            <i class="fas fa-sync"></i><br/>
+            Refresh SEM Trays<br/>
+            <small>Reset stub positions</small>
+        </button>
+        <button class="btn btn-primary" data-function="clear_tem_memory" id="refresh-tem-btn">
+            <i class="fas fa-sync"></i><br/>
+            Refresh TEM Trays<br/>
+            <small>Reset disk positions</small>
+        </button>
+        <button class="btn btn-primary" data-function="get_sem_positions" id="check-sem-positions-btn">
+            <i class="fas fa-eye"></i><br/>
+            Check SEM Positions<br/>
+            <small>View current status</small>
+        </button>
+        <button class="btn btn-primary" data-function="get_tem_positions" id="check-tem-positions-btn">
+            <i class="fas fa-eye"></i><br/>
+            Check TEM Positions<br/>
+            <small>View current status</small>
+        </button>
+    </div>
+</div>
+<div class="form-card">
     <h2 class="main-subtitle">Communication tests</h2>
     <div class="button-group">
         <button class="btn btn-primary" data-function="c3dp_test_connectivity_machine_test_page"

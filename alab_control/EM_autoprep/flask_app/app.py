@@ -32,6 +32,9 @@ from database import (
     get_tem_positions,
     clear_sem_positions,
     clear_tem_positions,
+    #update_sem_position,
+    update_system_state,
+    get_last_process_result,
     init_soak_test_database,
     create_soak_test_session,
     update_soak_test_session,
@@ -178,6 +181,11 @@ def read_CSV_into_positions(path):
     
   return positions
 
+def broadcast(message):
+    """Send the same message to both console and socketio."""
+    print(message)
+    socketio.emit('function_response', {'result': message})
+
 class SamplePrepEnder3(Ender3):
     # positions
     clean_disk_pos = read_CSV_into_positions(
@@ -206,7 +214,6 @@ class SamplePrepEnder3(Ender3):
             except Exception as e:
                 print(f"Error closing serial port: {e}")
 
-# Define action functions
 def send_plc_command(message):
     print('Sending to PLC >> ' + message)  # Print to Python terminal
     socketio.emit('function_response', {'result': 'Sending to PLC >> ' + message})
@@ -246,7 +253,6 @@ def send_plc_command(message):
         print(error_message)
         socketio.emit('function_response', {'result': error_message})
         return error_message
-
 
 def button_action(button_id):
     print(f"Button action called for {button_id}")
@@ -651,7 +657,6 @@ def device_step_final(robot=None):
         # Otherwise use the global robot management system
         return handle_robot_operation(_final_operation)
     
-
 def device_extend_bed():
     return device_move_bed("extend")
 
@@ -845,7 +850,7 @@ def home_robot_manual():
             return False
 
     return handle_robot_operation(_home_operation, robot=global_robot)
-
+''' Backup of the previous SEM process action before position tracking
 def sem_process_action(voltage, c_height, distance, etime, origin, destination, process_run_id=None, motor1_enabled=False, motor2_enabled=False):
     def _sem_operation(robot, voltage, c_height, distance, etime, origin, destination, motor1_enabled, motor2_enabled, process_run_id):
         # Initialize success flag
@@ -1148,6 +1153,394 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination, 
     
     # Call the operation with proper error handling
     result = handle_control_panel_operation(_wrapper_with_logging)
+    
+    # Additional logging for wrapper failures (PLC/robot connection issues)
+    if result is False and process_run_id:
+        # This catches cases where handle_control_panel_operation or handle_robot_operation fail
+        log_error(process_run_id, "Process failed due to control panel or robot connection issues", "system")
+    
+    # Ensure we return the actual result
+    return result
+'''
+def sem_process_action(voltage, c_height, distance, etime, origin, destination, process_run_id=None, motor1_enabled=False, motor2_enabled=False):
+    """
+    Enhanced SEM process action with position tracking integration.
+    
+    Args:
+        voltage: Exposure voltage
+        c_height: Container height  
+        distance: Vertical shift
+        etime: Exposure time
+        origin: Origin position (e.g., 'A1')
+        destination: Destination position (e.g., 'A2' or 'tray')
+        process_run_id: Optional process run ID for database logging
+        motor1_enabled: Enable vibration motor 1
+        motor2_enabled: Enable vibration motor 2
+    
+    Returns:
+        Success or error message
+    """
+
+    # Format voltage and time to 5 characters with leading zeros
+    voltage_formatted = f"{int(voltage):05d}"
+    etime_formatted = f"{int(etime):05d}"
+
+    broadcast(f"SEM process requested with parameters: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}, vibMotor1={motor1_enabled}, vibMotor2={motor2_enabled}")
+    
+    def get_position_status(position_type, position_name):
+        """Get the current status of a specific position."""
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                
+                if position_type == 'sem':
+                    cursor.execute("""
+                        SELECT status FROM sem_positions 
+                        WHERE position_name = ?
+                    """, (position_name,))
+                    
+                    result = cursor.fetchone()
+                    return result[0] if result else 'unknown'
+                    
+        except Exception as e:
+            print(f"Error getting position status: {e}")
+            return 'unknown'
+    
+    def update_position_status(position_type, position_name, new_status):
+        """Update the status of a specific position."""
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                
+                if position_type == 'sem':
+                    cursor.execute("""
+                        UPDATE sem_positions 
+                        SET status = ?, last_updated = CURRENT_TIMESTAMP
+                        WHERE position_name = ?
+                    """, (new_status, position_name))
+                    
+                    conn.commit()
+                    print(f"Updated SEM position {position_name} to status: {new_status}")
+                    return True
+                    
+        except Exception as e:
+            print(f"Error updating position status: {e}")
+            return False
+    
+    # POSITION VALIDATION - Check both origin and destination before starting
+    try:
+        # Check origin position availability
+        origin_status = get_position_status('sem', origin)
+        if origin_status != 'clean_stub':
+            error_msg = f"ERROR: Origin position {origin} does not contain a clean stub (current status: {origin_status}). Please verify sample tracking on your end."
+            broadcast(error_msg)
+            
+            # Log the validation error
+            if process_run_id:
+                log_error(process_run_id, error_msg, "user")
+            else:
+                log_standalone_error(error_msg, "user")
+            
+            return error_msg
+        
+        # Check destination position availability (only if not returning to same tray)
+        if destination != "tray":
+            destination_status = get_position_status('sem', destination)
+            if destination_status != 'empty':
+                error_msg = f"ERROR: Destination position {destination} is already occupied (current status: {destination_status}). Please verify sample tracking on your end."
+                broadcast(error_msg)
+                
+                # Log the validation error
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "user")
+                else:
+                    log_standalone_error(error_msg, "user")
+                
+                return error_msg
+        
+    except Exception as e:
+        error_msg = f"ERROR: Failed to validate positions: {str(e)}"
+        broadcast(error_msg)
+        
+        if process_run_id:
+            log_error(process_run_id, error_msg, "system")
+        else:
+            log_standalone_error(error_msg, "system")
+        
+        return error_msg
+    
+    def _sem_operation(robot, voltage, c_height, distance, etime, origin, destination, motor1_enabled, motor2_enabled, process_run_id):
+        # Initialize success flag
+        process_successful = False
+        
+        try:
+            # Step 1: Home the robot first
+            try:
+                robot.gohome()
+            except Exception as e:
+                error_msg = f"Error during homing: {e}"
+                broadcast(error_msg)
+                # Log specific error
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "robot")
+                return False
+
+            # Step 2: Move to intermediate position
+            try:
+                robot.speed = SPEED_NORMAL
+                robot.moveto(*robot.intermediate_pos["ZHOME"])
+            except Exception as e:
+                error_msg = f"Error moving to intermediate position: {e}"
+                broadcast(error_msg)
+                # Log specific error
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "robot")
+                return False
+
+            # Step 3: Stub collection with improved error handling
+            stub_pick_trials = 0
+            stub_picked = False
+            
+            try:
+                control_panel_vacuum("SEM", True)
+            except Exception as e:
+                error_msg = f"Error enabling vacuum: {e}"
+                broadcast(error_msg)
+                # Log specific error
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "PLC")
+                return False
+            
+            while stub_pick_trials <= 2:  # Changed condition for clarity
+                try:
+                    broadcast("Trying to pick the stub...")
+
+                    # Stub picking sequence
+                    robot.moveto(*robot.clean_stub_pos[origin])
+                    robot.moveto(*robot.clean_stub_pos["STRAY_Z1"])
+                    robot.speed = SPEED_LOW
+                    robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+                    robot.speed = SPEED_VLOW
+                    robot.moveto(*robot.clean_stub_pos["STRAY_Z3"])
+                    robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+                    robot.speed = SPEED_NORMAL
+                    robot.moveto(*robot.intermediate_pos["ZHOME"])
+                    
+                    broadcast("Checking if stub was picked...")
+                    
+                    # Move to laser detection position
+                    robot.moveto(*robot.equipment_pos["LASER_SEM"])
+                    robot.moveto(*robot.equipment_pos["LASER_SEM_Z1"])
+
+                    # Check if stub was picked
+                    if control_panel_laser_status() == "LASER1":
+                        broadcast("Stub was picked!")
+                        stub_picked = True
+                        robot.moveto(*robot.intermediate_pos["ZHOME"])
+                        break
+                    else:
+                        broadcast("Stub was not detected. Trying again...")
+                        robot.moveto(*robot.intermediate_pos["ZHOME"])
+                        stub_pick_trials += 1
+                        
+                except Exception as e:
+                    error_msg = f"Error during stub picking attempt {stub_pick_trials + 1}: {e}"
+                    broadcast(error_msg)
+                    # Log specific error for each attempt
+                    if process_run_id:
+                        log_error(process_run_id, error_msg, "robot")
+                    stub_pick_trials += 1
+                    
+                    # Try to recover to safe position
+                    try:
+                        robot.speed = SPEED_NORMAL
+                        robot.moveto(*robot.intermediate_pos["ZHOME"])
+                    except:
+                        pass  # If recovery fails, we'll catch it in the outer try-except
+
+            # Check if stub picking failed
+            if not stub_picked:
+                error_msg = "Stub not picked after 3 attempts. Process failed."
+                broadcast(error_msg)
+                # Log specific error for stub picking failure
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "process")
+                try:
+                    control_panel_vacuum("SEM", False)
+                except:
+                    pass
+                return False  # Explicitly return False for failed stub picking
+
+            # Step 4: Charging and exposure process
+            try:
+                # Move to charger and position for exposure
+                robot.moveto(*robot.equipment_pos["CHARGER_SEM"])
+                robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height))
+                broadcast(f"Setting at: {MEASURED_BASE_HEIGHT - int(c_height)} mm.")
+                robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height) + int(distance))
+                broadcast(f"Exposing at: {MEASURED_BASE_HEIGHT - int(c_height) + int(distance)} mm.")
+
+                # VIBRATION MOTOR INTEGRATION - Turn on motors before exposure
+                if motor1_enabled or motor2_enabled:
+                    try:
+                        broadcast("Turning on vibration motors...")
+                        control_vibration_motors(motor1_enabled, motor2_enabled, turn_on=True)
+                    except Exception as e:
+                        error_msg = f"Warning: Error turning on vibration motors: {e}"
+                        broadcast(error_msg)
+                        # Log motor error but continue
+                        if process_run_id:
+                            log_error(process_run_id, error_msg, "PLC")
+
+                # Actual charging and exposure
+                broadcast(f"Stub will be exposed to {voltage} kV for {etime} ms.")
+                control_panel_hvps_setting(voltage_formatted, etime_formatted)
+                time.sleep(int(etime)/1000+2)
+                
+                # VIBRATION MOTOR INTEGRATION - Turn off motors after exposure
+                if motor1_enabled or motor2_enabled:
+                    try:
+                        broadcast("Turning off vibration motors...")
+                        control_vibration_motors(motor1_enabled, motor2_enabled, turn_on=False)
+                    except Exception as e:
+                        error_msg = f"Warning: Error turning off vibration motors: {e}"
+                        broadcast(error_msg)
+                        # Log motor error but continue
+                        if process_run_id:
+                            log_error(process_run_id, error_msg, "PLC")
+
+                robot.moveto(*robot.intermediate_pos["ZHOME"])
+                
+            except Exception as e:
+                error_msg = f"Error during charging/exposure process: {e}"
+                broadcast(error_msg)
+                # Log specific error
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "process")
+                # Ensure motors are turned off
+                try:
+                    if motor1_enabled or motor2_enabled:
+                        control_panel_vibration_motor_all_off()
+                except:
+                    pass
+                return False
+
+            # Step 5: Delivery to destination
+            try:
+                if destination == "tray":
+                    broadcast(f"Delivering stub to tray: {origin}.")
+                    robot.moveto(*robot.clean_stub_pos[origin])
+                    robot.moveto(*robot.clean_stub_pos["STRAY_Z1"])
+                    robot.speed = SPEED_LOW
+                    robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+                    robot.speed = SPEED_VLOW
+                    robot.moveto(*robot.clean_stub_pos["STRAY_Z3"])
+                    control_panel_vacuum("SEM", False)
+                    time.sleep(PAUSE_VAC)
+                    robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+                    robot.speed = SPEED_NORMAL
+                    robot.moveto(*robot.intermediate_pos["ZHOME"])
+                    robot.moveto(x=robot.intermediate_pos["HOME"][0])
+                    robot.moveto(y=robot.intermediate_pos["HOME"][1])
+                else:
+                    broadcast(f"Delivering stub to stage: {destination}.")
+                    
+                    # Move to destination position
+                    robot.moveto(*robot.phenom_stub_pos[destination])
+                    robot.moveto(*robot.phenom_stub_pos["PSTAGE_Z1"])
+                    robot.speed = SPEED_LOW
+                    robot.moveto(*robot.phenom_stub_pos["PSTAGE_Z2"])
+                    robot.speed = SPEED_VLOW
+                    robot.moveto(*robot.phenom_stub_pos["PSTAGE_Z3"])
+                    control_panel_vacuum("SEM", False)
+                    time.sleep(PAUSE_VAC)
+                    robot.moveto(*robot.phenom_stub_pos["PSTAGE_Z2"])
+                    robot.speed = SPEED_NORMAL
+
+                    # Opening gripper
+                    control_panel_gripper_home()
+                    robot.speed = SPEED_NORMAL
+                    robot.moveto(*robot.intermediate_pos["ZHOME"])
+                    control_panel_sem_stage_close()
+                    # Homing in X and Y only so the machine doesn't do two bed retractions
+                    robot.moveto(x=robot.intermediate_pos["HOME"][0])
+                    robot.moveto(y=robot.intermediate_pos["HOME"][1])
+
+            except Exception as e:
+                error_msg = f"Error during delivery process: {e}"
+                broadcast(error_msg)
+                # Log specific error
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "robot")
+                return False
+
+            # Step 6: Final cleanup
+            try:
+                device_step_final(robot)
+                process_successful = True  # Only set to True if we reach this point
+                broadcast("SEM process completed successfully.")
+                return True
+                
+            except Exception as e:
+                error_msg = f"Error in final cleanup: {e}"
+                broadcast(error_msg)
+                # Log specific error
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "robot")
+                return False
+
+        except Exception as e:
+            error_msg = f"Unexpected error in SEM process: {e}"
+            broadcast(error_msg)
+            # Log unexpected error
+            if process_run_id:
+                log_error(process_run_id, error_msg, "system")
+            # Ensure motors are turned off in case of error
+            try:
+                if motor1_enabled or motor2_enabled:
+                    control_panel_vibration_motor_all_off()
+            except:
+                pass
+            return False
+
+    # Modified wrapper call to pass process_run_id through
+    def _wrapper_with_logging():
+        return handle_robot_operation(
+            lambda robot: _sem_operation(
+                robot, voltage, c_height, distance, etime, 
+                origin, destination, motor1_enabled, motor2_enabled, process_run_id
+            ),
+            robot=global_robot
+        )
+    
+    # Call the operation with proper error handling
+    result = handle_control_panel_operation(_wrapper_with_logging)
+    
+    # POSITION TRACKING UPDATE - Only update positions on successful completion
+    if result is True:
+        try:
+            # Update origin position to empty (stub was taken)
+            update_position_status('sem', origin, 'empty')
+            
+            # Update destination position based on where stub was delivered
+            if destination == "tray":
+                # Stub returned to same tray position as used
+                update_position_status('sem', origin, 'used_stub')
+            else:
+                # Stub delivered to stage position
+                update_position_status('sem', destination, 'used_stub')
+            
+            print(f"Position tracking updated successfully: {origin} -> empty, {destination if destination != 'tray' else origin} -> used_stub")
+            
+        except Exception as e:
+            error_msg = f"Warning: Process completed but position tracking update failed: {str(e)}"
+            broadcast(error_msg)
+            
+            # Log the tracking error but don't fail the process
+            if process_run_id:
+                log_error(process_run_id, error_msg, "system")
+            else:
+                log_standalone_error(error_msg, "system")
     
     # Additional logging for wrapper failures (PLC/robot connection issues)
     if result is False and process_run_id:
@@ -1784,8 +2177,6 @@ def tem_manual_prepare(process_run_id=None):
         
         return error_msg
 
-# Similarly, consolidate tem_manual_complete and enhanced_tem_manual_complete:
-
 def tem_manual_complete(process_run_id=None):
     """
     Consolidated manual TEM completion with database logging.
@@ -1975,8 +2366,9 @@ current_remote_operation = None
 
 def state_check():
     """
-    Check the current state of the machine for remote monitoring.
-    Returns: JSON string with state information
+    Simplified state check that always returns the last operation result.
+    
+    Returns: JSON string with comprehensive state information
     """
     try:
         # Check if any process is currently running
@@ -1996,22 +2388,49 @@ def state_check():
                 'timestamp': datetime.now().isoformat()
             }
         else:
-            # Get the last known state from database
-            system_state = get_system_state()
+            # System is idle - get the last process result
+            result = {
+                'status': 'idle',
+                'timestamp': datetime.now().isoformat()
+            }
             
-            if system_state['last_error_message']:
-                result = {
-                    'status': 'error',
-                    'last_operation': system_state['last_operation'],
-                    'error_message': system_state['last_error_message'],
-                    'timestamp': system_state['last_updated']
-                }
+            # Always get the last process result
+            last_process = get_last_process_result()
+            
+            if last_process:
+                # Always include last operation info
+                result.update({
+                    'last_operation': last_process['process_type'],
+                    'last_operation_result': 'success' if last_process['success'] else 'failed',
+                    'last_operation_timestamp': last_process['timestamp']
+                })
+                
+                # Add details based on success/failure
+                if last_process['success']:
+                    result['last_operation_details'] = f"{last_process['process_type']} completed successfully"
+                    if last_process['duration_seconds']:
+                        result['duration_seconds'] = last_process['duration_seconds']
+                else:
+                    # Include error details for failures
+                    result['last_operation_details'] = last_process['error_message'] or f"{last_process['process_type']} failed"
+                    if last_process['error_category']:
+                        result['error_category'] = last_process['error_category']
+                    if last_process['component']:
+                        result['error_component'] = last_process['component']
+                
+                # Always include parameters if available
+                if last_process['parameters']:
+                    try:
+                        result['last_operation_parameters'] = json.loads(last_process['parameters'])
+                    except:
+                        pass
             else:
-                result = {
-                    'status': 'idle',
-                    'last_operation': system_state['last_operation'],
-                    'timestamp': system_state['last_updated']
-                }
+                # No previous operations found
+                result.update({
+                    'last_operation': 'none',
+                    'last_operation_result': 'none',
+                    'last_operation_details': 'No previous operations recorded'
+                })
         
         return json.dumps(result)
         
@@ -3782,7 +4201,12 @@ function_map = {
     'device_retract_bed': device_retract_bed,
     'robot_manual_move': move_robot_manual,
     'robot_manual_home': home_robot_manual,
-    'send_manual_plc_command': send_manual_plc_command
+    'send_manual_plc_command': send_manual_plc_command,
+    'state_check': state_check,
+    'get_sem_positions': get_sem_position_status,
+    'get_tem_positions': get_tem_position_status,
+    'clear_sem_memory': clear_sem_memory,
+    'clear_tem_memory': clear_tem_memory
 }
 
 @app.route('/get_page/<page>')
@@ -4981,36 +5405,9 @@ def stop_sem_to_stage_test():
 
 #endregion
 
-def determine_success(result):
-    """
-    Determine if a function result indicates success.
-    
-    Args:
-        result: Function return value (bool, str, or other)
-    
-    Returns:
-        bool: True if successful, False if failed
-    """
-    # Explicit boolean False indicates failure
-    if result is False:
-        return False
-    
-    # Explicit boolean True indicates success
-    if result is True:
-        return True
-    
-    # For string results, check for error indicators
-    if isinstance(result, str):
-        error_indicators = ["error", "failed", "timeout", "no response", "aborted", "not ready"]
-        return not any(indicator in result.lower() for indicator in error_indicators)
-    
-    # For other types (None, numbers, objects), consider them as success
-    # unless they are falsy values
-    return bool(result)
-
 def dispatch_action(data):
     """
-    Consolidated dispatch_action with soak test blocking, database logging, and vibration motor support.
+    Enhanced dispatch_action with proper state tracking.
     This replaces both dispatch_action and original_dispatch_action functions.
     """
     global soak_test_in_progress, current_process_runs
@@ -5047,6 +5444,9 @@ def dispatch_action(data):
     start_time = time.time()
     
     if should_log_process(function_type):
+        # UPDATE SYSTEM STATE TO RUNNING
+        update_system_state('running', function_type, None)
+        
         # Extract parameters for logging
         parameters = extract_parameters_for_logging(function_type, data)
         process_run_id = start_process_run(process_type, parameters)
@@ -5064,6 +5464,8 @@ def dispatch_action(data):
         if process_run_id:
             log_error(process_run_id, error_msg, "system")
             end_process_run(process_run_id, False, "User_Error", time.time() - start_time)
+            # UPDATE SYSTEM STATE BACK TO IDLE WITH ERROR
+            update_system_state('idle', function_type, None)
         else:
             log_standalone_error(error_msg, "system")
         return error_msg
@@ -5131,13 +5533,17 @@ def dispatch_action(data):
         
         # Log completion using improved success determination
         if process_run_id and current_process_runs.get(process_run_id):
-            success = determine_success(result)  # Use the new success determination function
+            success = determine_operation_success(result)  # Use the renamed function
             
             if success:
                 end_process_run(process_run_id, True, "Success", time.time() - start_time)
+                # UPDATE SYSTEM STATE BACK TO IDLE (SUCCESS)
+                update_system_state('idle', function_type, None)
             else:
                 end_process_run(process_run_id, False, "Process_Failed", time.time() - start_time)
                 log_error(process_run_id, str(result), "process")
+                # UPDATE SYSTEM STATE BACK TO IDLE (ERROR WILL BE FOUND VIA QUERY)
+                update_system_state('idle', function_type, None)
             
             # Clean up tracking
             current_process_runs.pop(process_run_id, None)
@@ -5152,17 +5558,40 @@ def dispatch_action(data):
             log_error(process_run_id, error_msg, "application")
             end_process_run(process_run_id, False, "Application_Error", time.time() - start_time)
             current_process_runs.pop(process_run_id, None)
+            # UPDATE SYSTEM STATE BACK TO IDLE (ERROR LOGGED)
+            update_system_state('idle', function_type, None)
         else:
             log_standalone_error(error_msg, "application")
         
         return error_msg
 
+def determine_operation_success(result):
+    """
+    Determine if a function result indicates success.
+    
+    Args:
+        result: The result returned by the action function
+    
+    Returns:
+        bool: True if successful, False if failed
+    """
+    if isinstance(result, bool):
+        return result
+    elif isinstance(result, str):
+        # Check for common error indicators in string results
+        error_indicators = ['error', 'failed', 'timeout', 'not picked', 'not detected']
+        result_lower = result.lower()
+        return not any(indicator in result_lower for indicator in error_indicators)
+    else:
+        # For other types, assume success unless explicitly False or None
+        return result is not False and result is not None
+
 def determine_process_type(function_type, data):
     """Determine the process type for logging purposes."""
     if function_type == 'sem_process':
-        return 'SEM_tray'
+        return 'sem_process'
     elif function_type == 'tem_process':
-        return 'TEM_tray'
+        return 'tem_process'
     elif function_type in ['tem_manual_prepare', 'tem_manual_expose', 'tem_manual_complete']:
         return 'TEM_manual'
     elif 'machine_test' in function_type or 'test_connectivity' in function_type:
