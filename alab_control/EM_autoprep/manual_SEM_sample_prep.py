@@ -64,7 +64,7 @@ class SamplePrepEnder3(Ender3):
     PHENOM_POS8 = (133, 76, None)
     Z_PHENOM_POS8_1 = (None, None, 32)
     Z_PHENOM_POS8_0 = (None, None, 35)
-
+ 
     #we need 18 clean stubs
     #we need 18 prepared stubs
     #we need 40 grid positions

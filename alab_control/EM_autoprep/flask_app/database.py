@@ -587,6 +587,120 @@ def get_component_reliability():
         print(f"Error getting component reliability: {e}")
         return []
     
+
+def get_recent_operations_with_details(limit=10):
+    """
+    Get recent operations with detailed failure information.
+    
+    Args:
+        limit (int): Maximum number of operations to return
+    
+    Returns:
+        list: List of dictionaries with operation details and failure points
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT 
+                    pr.id,
+                    pr.timestamp,
+                    pr.process_type,
+                    pr.success,
+                    pr.error_category,
+                    pr.duration_seconds,
+                    pr.parameters,
+                    GROUP_CONCAT(ed.error_message, ' | ') as error_messages,
+                    GROUP_CONCAT(ed.component, ', ') as failed_components,
+                    COUNT(ed.id) as error_count
+                FROM process_runs pr
+                LEFT JOIN error_details ed ON pr.id = ed.process_run_id
+                GROUP BY pr.id
+                ORDER BY pr.timestamp DESC
+                LIMIT ?
+            """, (limit,))
+            
+            operations = []
+            for row in cursor.fetchall():
+                operation = dict(row)
+                
+                # Parse parameters if available
+                if operation['parameters']:
+                    try:
+                        operation['parsed_parameters'] = json.loads(operation['parameters'])
+                    except:
+                        operation['parsed_parameters'] = {}
+                else:
+                    operation['parsed_parameters'] = {}
+                
+                # Format timestamp for display
+                if operation['timestamp']:
+                    dt = datetime.fromisoformat(operation['timestamp'])
+                    operation['formatted_time'] = dt.strftime('%Y-%m-%d %H:%M:%S')
+                    operation['time_ago'] = get_time_ago(dt)
+                
+                # Determine failure stage based on error messages
+                if not operation['success'] and operation['error_messages']:
+                    operation['failure_stage'] = determine_failure_stage(operation['error_messages'])
+                else:
+                    operation['failure_stage'] = 'Completed Successfully'
+                
+                operations.append(operation)
+            
+            return operations
+            
+    except Exception as e:
+        print(f"Error getting recent operations: {e}")
+        return []
+
+def determine_failure_stage(error_messages):
+    """Determine which stage of the process failed based on error messages."""
+    if not error_messages:
+        return "Unknown"
+    
+    error_text = error_messages.lower()
+    
+    # Define failure stages based on error patterns
+    if any(keyword in error_text for keyword in ['home', 'homing', 'gohome']):
+        return "Robot Homing"
+    elif any(keyword in error_text for keyword in ['intermediate position', 'moving to']):
+        return "Robot Positioning"
+    elif any(keyword in error_text for keyword in ['vacuum', 'enabling vacuum']):
+        return "Vacuum System"
+    elif any(keyword in error_text for keyword in ['stub not picked', 'grid not picked', 'laser', 'detection']):
+        return "Sample Pickup"
+    elif any(keyword in error_text for keyword in ['charging', 'exposure', 'hvps']):
+        return "Sample Exposure"
+    elif any(keyword in error_text for keyword in ['delivery', 'delivering', 'stage']):
+        return "Sample Delivery"
+    elif any(keyword in error_text for keyword in ['final cleanup', 'device_step_final']):
+        return "Final Cleanup"
+    elif any(keyword in error_text for keyword in ['control panel', 'plc', 'timeout', 'no response']):
+        return "Control Panel Communication"
+    elif any(keyword in error_text for keyword in ['robot', 'connection', 'serial']):
+        return "Robot Communication"
+    elif any(keyword in error_text for keyword in ['vibration', 'motor']):
+        return "Vibration Motors"
+    else:
+        return "Process Execution"
+
+def get_time_ago(dt):
+    """Get human-readable time difference."""
+    now = datetime.now()
+    diff = now - dt
+    
+    if diff.days > 0:
+        return f"{diff.days} day{'s' if diff.days != 1 else ''} ago"
+    elif diff.seconds > 3600:
+        hours = diff.seconds // 3600
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    elif diff.seconds > 60:
+        minutes = diff.seconds // 60
+        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+    else:
+        return "Just now"
+    
 #region Soak test functions
 
 def init_soak_test_database():

@@ -1,186 +1,369 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EM Autoprep Statistics</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <title>EM Autoprep - System Statistics</title>
     <style>
-        /* Additional styles specific to stats page */
-        .stats-container {
-            max-width: 1200px;
-            margin: 0 auto;
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
             padding: 20px;
         }
-        
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .last-updated {
+            text-align: center;
+            padding: 15px;
+            background: #f8f9fa;
+            color: #666;
+            border-bottom: 1px solid #eee;
+        }
+
+        .summary-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            padding: 30px;
+            background: #f8f9fa;
+        }
+
+        .summary-card {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+
+        .summary-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .summary-card h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-size: 1.1em;
+        }
+
+        .summary-card .value {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #3498db;
+            margin-bottom: 10px;
+        }
+
+        .summary-card .label {
+            color: #7f8c8d;
+            font-size: 0.9em;
+        }
+
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
             gap: 30px;
-            margin: 20px 0;
+            padding: 30px;
         }
-        
+
         .stats-card {
-            background-color: white;
+            background: white;
+            border-radius: 12px;
             padding: 25px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            border: 1px solid #e0e0e0;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
         }
-        
+
+        .stats-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+
         .stats-card h2 {
-            color: #3f51b5;
-            margin-top: 0;
+            color: #2c3e50;
             margin-bottom: 20px;
-            font-size: 1.4em;
-            border-bottom: 2px solid #3f51b5;
+            font-size: 1.3em;
+            border-bottom: 3px solid #3498db;
             padding-bottom: 10px;
         }
-        
+
         .stats-table {
             width: 100%;
             border-collapse: collapse;
-            margin: 10px 0;
+            margin-top: 15px;
         }
-        
+
         .stats-table th,
         .stats-table td {
-            border: 1px solid #ddd;
-            padding: 12px 8px;
+            padding: 12px;
             text-align: left;
+            border-bottom: 1px solid #eee;
         }
-        
+
         .stats-table th {
-            background-color: #f8f9fa;
-            font-weight: bold;
-            color: #333;
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #2c3e50;
+            position: sticky;
+            top: 0;
         }
-        
-        .stats-table tr:nth-child(even) {
-            background-color: #f9f9f9;
-        }
-        
+
         .stats-table tr:hover {
-            background-color: #f0f0f0;
+            background: #f8f9fa;
         }
-        
-        .success-rate {
-            font-weight: bold;
-        }
-        
-        .success-rate.high {
-            color: #28a745;
-        }
-        
-        .success-rate.medium {
-            color: #ffc107;
-        }
-        
-        .success-rate.low {
-            color: #dc3545;
-        }
-        
+
+        .success-rate.high { color: #27ae60; font-weight: bold; }
+        .success-rate.medium { color: #f39c12; font-weight: bold; }
+        .success-rate.low { color: #e74c3c; font-weight: bold; }
+
         .error-count {
+            background: #e74c3c;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.85em;
             font-weight: bold;
-            color: #dc3545;
         }
-        
+
+        .truncated-error {
+            cursor: help;
+            text-decoration: underline dotted #3498db;
+        }
+
         .no-data {
             text-align: center;
-            color: #666;
+            color: #7f8c8d;
             font-style: italic;
-            padding: 20px;
-        }
-        
-        .refresh-info {
-            background-color: #e3f2fd;
-            border: 1px solid #2196f3;
-            border-radius: 4px;
-            padding: 15px;
+            padding: 40px;
+            background: #f8f9fa;
+            border-radius: 8px;
             margin: 20px 0;
-            color: #1976d2;
         }
-        
-        .control-panel {
+
+        /* Recent Operations Specific Styles */
+        .recent-operations {
+            grid-column: 1 / -1; /* Full width */
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            border: none;
+        }
+
+        .recent-operations h2 {
+            color: white;
+            border-bottom: 3px solid rgba(255,255,255,0.3);
+        }
+
+        .operation-item {
+            background: rgba(255,255,255,0.95);
+            color: #2c3e50;
+            margin: 10px 0;
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 5px solid #3498db;
+            transition: all 0.3s ease;
+        }
+
+        .operation-item:hover {
+            transform: translateX(5px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .operation-item.failed {
+            border-left-color: #e74c3c;
+        }
+
+        .operation-item.success {
+            border-left-color: #27ae60;
+        }
+
+        .operation-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 30px;
-            padding: 20px;
-            background-color: #f8f9fa;
-            border-radius: 8px;
-            border: 1px solid #dee2e6;
+            margin-bottom: 10px;
         }
-        
-        .control-panel h1 {
-            margin: 0;
-            color: #333;
+
+        .operation-title {
+            font-weight: bold;
+            font-size: 1.1em;
         }
-        
-        .control-buttons {
-            display: flex;
-            gap: 10px;
+
+        .operation-time {
+            font-size: 0.9em;
+            color: #7f8c8d;
         }
-        
-        .truncated-error {
-            max-width: 400px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            cursor: help;
-        }
-        
-        .summary-stats {
+
+        .operation-details {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 15px;
-            margin-bottom: 30px;
+            margin-top: 15px;
         }
-        
-        .summary-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px;
-            border-radius: 8px;
-            text-align: center;
-        }
-        
-        .summary-card h3 {
-            margin: 0 0 10px 0;
-            font-size: 1.1em;
-        }
-        
-        .summary-card .value {
-            font-size: 2em;
-            font-weight: bold;
-            margin: 10px 0;
-        }
-        
-        .summary-card .label {
+
+        .detail-item {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 6px;
             font-size: 0.9em;
-            opacity: 0.9;
+        }
+
+        .detail-label {
+            font-weight: bold;
+            color: #2c3e50;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .detail-value {
+            color: #555;
+        }
+
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .failure-stage {
+            background: #fff3cd;
+            color: #856404;
+            padding: 6px 12px;
+            border-radius: 15px;
+            font-size: 0.85em;
+            font-weight: bold;
+            display: inline-block;
+            margin-top: 10px;
+        }
+
+        .parameters-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .param-item {
+            background: #e9ecef;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            color: #495057;
+        }
+
+        @media (max-width: 768px) {
+            .summary-stats {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .operation-details {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Collapsible Recent Operations Styles */
+        .collapsible-header {
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 25px;
+            margin: -25px -25px 20px -25px;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            border-radius: 12px 12px 0 0;
+            transition: all 0.3s ease;
+        }
+
+        .collapsible-header:hover {
+            background: linear-gradient(135deg, #e082ea 0%, #e4465b 100%);
+        }
+
+        .collapsible-toggle {
+            font-size: 1.2em;
+            font-weight: bold;
+            transition: transform 0.3s ease;
+        }
+
+        .collapsible-content {
+            max-height: 600px;
+            overflow-y: auto;
+            transition: max-height 0.3s ease;
+        }
+
+        .collapsible-content.collapsed {
+            max-height: 0;
+            overflow: hidden;
+        }
+
+        .recent-operations.collapsed .collapsible-toggle {
+            transform: rotate(180deg);
+        }
+
+        /* Remove the full-width grid spanning for recent operations */
+        .recent-operations {
+            /* Remove this line: grid-column: 1 / -1; */
+            background: white;
+            border: 2px solid #f093fb;
         }
     </style>
 </head>
 <body>
-    <div class="stats-container">
-        <div class="control-panel">
-            <h1>EM Autoprep System Statistics</h1>
-            <div class="control-buttons">
-                <button class="btn btn-primary" onclick="window.location.reload()">
-                    <i class="fas fa-refresh"></i> Refresh Data
-                </button>
-                <button class="btn btn-secondary" onclick="window.open('/api/stats/export', '_blank')">
-                    <i class="fas fa-download"></i> Export Data
-                </button>
-                <button class="btn btn-primary" onclick="window.location.href='/'">
-                    <i class="fas fa-home"></i> Back to Main
-                </button>
-            </div>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>📊 System Statistics Dashboard</h1>
+            <p>Comprehensive analysis of EM Autoprep system performance and reliability</p>
         </div>
 
-        <div class="refresh-info">
-            <strong>📊 Data Collection Info:</strong> Statistics are updated in real-time as processes run. 
+        <!-- Last Updated -->
+        <div class="last-updated">
             Last updated: <span id="last-updated">{{ last_updated }}</span>
         </div>
 
@@ -210,6 +393,72 @@
 
         <!-- Main Statistics Grid -->
         <div class="stats-grid">
+            <!-- Recent Operations Card 
+            <div class="stats-card recent-operations">
+                <h2>🕐 Recent Operations (Last 10 Procedures)</h2>
+                {% if recent_operations %}
+                    {% for operation in recent_operations %}
+                    <div class="operation-item {{ 'success' if operation.success else 'failed' }}">
+                        <div class="operation-header">
+                            <div class="operation-title">
+                                {{ operation.process_type }} #{{ operation.id }}
+                            </div>
+                            <div class="operation-time">
+                                {{ operation.formatted_time }} ({{ operation.time_ago }})
+                            </div>
+                        </div>
+                        
+                        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 10px;">
+                            <span class="status-badge {{ 'status-success' if operation.success else 'status-failed' }}">
+                                {{ 'SUCCESS' if operation.success else 'FAILED' }}
+                            </span>
+                            
+                            {% if operation.duration_seconds %}
+                            <span style="color: #666; font-size: 0.9em;">
+                                Duration: {{ "%.1f"|format(operation.duration_seconds) }}s
+                            </span>
+                            {% endif %}
+                        </div>
+
+                        {% if not operation.success %}
+                        <div class="failure-stage">
+                            Failed at: {{ operation.failure_stage }}
+                        </div>
+                        {% endif %}
+
+                        <div class="operation-details">
+                            {% if operation.parsed_parameters %}
+                            <div class="detail-item">
+                                <span class="detail-label">Parameters:</span>
+                                <div class="parameters-list">
+                                    {% for key, value in operation.parsed_parameters.items() %}
+                                    <span class="param-item">{{ key }}: {{ value }}</span>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            {% endif %}
+
+                            {% if operation.failed_components %}
+                            <div class="detail-item">
+                                <span class="detail-label">Failed Components:</span>
+                                <span class="detail-value">{{ operation.failed_components }}</span>
+                            </div>
+                            {% endif %}
+
+                            {% if operation.error_messages %}
+                            <div class="detail-item" style="grid-column: 1 / -1;">
+                                <span class="detail-label">Error Details:</span>
+                                <span class="detail-value">{{ operation.error_messages }}</span>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                <div class="no-data">No recent operations available. Run some processes to see operation history.</div>
+                {% endif %}
+            </div> -->
+
             <!-- Success Rates Card -->
             <div class="stats-card">
                 <h2>📈 Success Rates by Process Type (Last 30 Days)</h2>
@@ -305,74 +554,6 @@
                 {% endif %}
             </div>
 
-            <!-- Daily Process Counts Card -->
-            <div class="stats-card">
-                <h2>📅 Daily Process Activity (Last 7 Days)</h2>
-                {% if process_counts %}
-                <table class="stats-table">
-                    <thead>
-                        <tr>
-                            <th>Date</th>
-                            <th>Total Processes</th>
-                            <th>Successful</th>
-                            <th>Failed</th>
-                            <th>Success Rate</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for count in process_counts %}
-                        {% set failed = count.total_processes - count.successful_processes %}
-                        {% set rate = (count.successful_processes / count.total_processes * 100) if count.total_processes > 0 else 0 %}
-                        <tr>
-                            <td>{{ count.time_period }}</td>
-                            <td>{{ count.total_processes }}</td>
-                            <td>{{ count.successful_processes }}</td>
-                            <td>{{ failed }}</td>
-                            <td>
-                                <span class="success-rate {% if rate >= 90 %}high{% elif rate >= 70 %}medium{% else %}low{% endif %}">
-                                    {{ "%.1f"|format(rate) }}%
-                                </span>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-                {% else %}
-                <div class="no-data">No daily activity data available yet.</div>
-                {% endif %}
-            </div>
-
-            <!-- Performance Metrics Card -->
-            <div class="stats-card">
-                <h2>⚡ Performance Metrics</h2>
-                {% if performance_metrics %}
-                <table class="stats-table">
-                    <thead>
-                        <tr>
-                            <th>Process Type</th>
-                            <th>Successful Runs</th>
-                            <th>Avg Duration (s)</th>
-                            <th>Min Duration (s)</th>
-                            <th>Max Duration (s)</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for metric in performance_metrics %}
-                        <tr>
-                            <td>{{ metric.process_type }}</td>
-                            <td>{{ metric.successful_runs }}</td>
-                            <td>{{ "%.1f"|format(metric.avg_duration) }}</td>
-                            <td>{{ "%.1f"|format(metric.min_duration) }}</td>
-                            <td>{{ "%.1f"|format(metric.max_duration) }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-                {% else %}
-                <div class="no-data">No performance data available yet.</div>
-                {% endif %}
-            </div>
-
             <!-- Component Reliability Card -->
             <div class="stats-card">
                 <h2>🔧 Component Reliability</h2>
@@ -401,12 +582,115 @@
                 <div class="no-data">No component error data available yet.</div>
                 {% endif %}
             </div>
+
+            <!-- Performance Metrics Card -->
+            <div class="stats-card">
+                <h2>⚡ Performance Metrics</h2>
+                {% if performance_metrics %}
+                <table class="stats-table">
+                    <thead>
+                        <tr>
+                            <th>Process Type</th>
+                            <th>Avg Duration</th>
+                            <th>Min Duration</th>
+                            <th>Max Duration</th>
+                            <th>Successful Runs</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for metric in performance_metrics %}
+                        <tr>
+                            <td>{{ metric.process_type }}</td>
+                            <td>{{ "%.1f"|format(metric.avg_duration) }}s</td>
+                            <td>{{ "%.1f"|format(metric.min_duration) }}s</td>
+                            <td>{{ "%.1f"|format(metric.max_duration) }}s</td>
+                            <td>{{ metric.successful_runs }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="no-data">No performance data available yet.</div>
+                {% endif %}
+            </div>
+            <!-- Recent Operations Card -->
+            <div class="stats-card recent-operations">
+                <div class="collapsible-header" onclick="toggleRecentOperations()">
+                    <h2 style="margin: 0; border: none; color: white;">🕐 Recent Operations (Last 10 Procedures)</h2>
+                    <span class="collapsible-toggle">▼</span>
+                </div>
+                
+                <div class="collapsible-content" id="recent-operations-content">
+                    {% if recent_operations %}
+                        {% for operation in recent_operations %}
+                        <div class="operation-item {{ 'success' if operation.success else 'failed' }}">
+                            <div class="operation-header">
+                                <div class="operation-title">
+                                    {{ operation.process_type }} #{{ operation.id }}
+                                </div>
+                                <div class="operation-time">
+                                    {{ operation.formatted_time }} ({{ operation.time_ago }})
+                                </div>
+                            </div>
+                            
+                            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 10px;">
+                                <span class="status-badge {{ 'status-success' if operation.success else 'status-failed' }}">
+                                    {{ 'SUCCESS' if operation.success else 'FAILED' }}
+                                </span>
+                                
+                                {% if operation.duration_seconds %}
+                                <span style="color: #666; font-size: 0.9em;">
+                                    Duration: {{ "%.1f"|format(operation.duration_seconds) }}s
+                                </span>
+                                {% endif %}
+                            </div>
+
+                            {% if not operation.success %}
+                            <div class="failure-stage">
+                                Failed at: {{ operation.failure_stage }}
+                            </div>
+                            {% endif %}
+
+                            <div class="operation-details">
+                                {% if operation.parsed_parameters %}
+                                <div class="detail-item">
+                                    <span class="detail-label">Parameters:</span>
+                                    <div class="parameters-list">
+                                        {% for key, value in operation.parsed_parameters.items() %}
+                                        <span class="param-item">{{ key }}: {{ value }}</span>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                                {% endif %}
+
+                                {% if operation.failed_components %}
+                                <div class="detail-item">
+                                    <span class="detail-label">Failed Components:</span>
+                                    <span class="detail-value">{{ operation.failed_components }}</span>
+                                </div>
+                                {% endif %}
+
+                                {% if operation.error_messages %}
+                                <div class="detail-item" style="grid-column: 1 / -1;">
+                                    <span class="detail-label">Error Details:</span>
+                                    <span class="detail-value">{{ operation.error_messages }}</span>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                    <div class="no-data">No recent operations available. Run some processes to see operation history.</div>
+                    {% endif %}
+                </div>
+            </div>
+        
         </div>
 
         <!-- Footer -->
         <div style="text-align: center; margin-top: 40px; padding: 20px; color: #666; border-top: 1px solid #eee;">
             <p>EM Autoprep System Statistics Dashboard | Data automatically collected during system operation</p>
-            <p><strong>Tip:</strong> This page auto-refreshes data when you reload. Consider bookmarking for easy access!</p>
+            <p><strong>Tip:</strong> The Recent Operations section shows exactly where each procedure succeeded or failed, helping you identify patterns and improve system reliability!</p>
         </div>
     </div>
 
@@ -416,6 +700,20 @@
         
         // Auto-refresh every 5 minutes (optional)
         // setTimeout(() => window.location.reload(), 300000);
+
+        function toggleRecentOperations() {
+            const content = document.getElementById('recent-operations-content');
+            const container = content.closest('.recent-operations');
+            
+            content.classList.toggle('collapsed');
+            container.classList.toggle('collapsed');
+        }
+
+        // Optional: Start collapsed by default
+        document.addEventListener('DOMContentLoaded', function() {
+            // Uncomment next line if you want it to start collapsed
+            // toggleRecentOperations();
+        });
     </script>
 </body>
 </html>

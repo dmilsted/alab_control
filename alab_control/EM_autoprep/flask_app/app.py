@@ -16,6 +16,7 @@ from database import (
     end_process_run, 
     log_error, 
     log_standalone_error,
+    get_recent_operations_with_details,
     get_success_rate_by_process_type,
     get_most_common_errors,
     get_process_counts_by_time_period,
@@ -877,90 +878,188 @@ def home_robot_manual():
 
     return handle_robot_operation(_home_operation, robot=global_robot)
 
-#region Backup of the old sem_process_action and tem_process_action
-''' 
-
-def sem_process_action(voltage, c_height, distance, etime, origin, destination):
-    def _sem_operation(robot, voltage, c_height, distance, etime, origin, destination):
+def sem_process_action(voltage, c_height, distance, etime, origin, destination, process_run_id=None, motor1_enabled=False, motor2_enabled=False):
+    def _sem_operation(robot, voltage, c_height, distance, etime, origin, destination, motor1_enabled, motor2_enabled, process_run_id):
+        # Initialize success flag
+        process_successful = False
+        
         try:
             # Format voltage and time to 5 characters with leading zeros
-            voltage = f"{int(voltage):05d}"
-            etime = f"{int(etime):05d}"
+            voltage_formatted = f"{int(voltage):05d}"
+            etime_formatted = f"{int(etime):05d}"
 
-            print(f"SEM process requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}")
-            socketio.emit('function_response', {'result': f"SEM process requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}"})
+            print(f"SEM process requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}, vibMotor1={motor1_enabled}, vibMotor2={motor2_enabled}")
+            socketio.emit('function_response', {'result': f"SEM process requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}, vibMotor1={motor1_enabled}, vibMotor2={motor2_enabled}"})
 
+            # Step 1: Home robot
             try:
                 robot.gohome()
-                
             except Exception as var_error:
-                print(f"An error occurred: {var_error}")
-                socketio.emit('function_response', {'result': f"An error occurred: {var_error}"})
+                error_msg = f"An error occurred when trying to home robot: {var_error}"
+                print(error_msg)
+                socketio.emit('function_response', {'result': error_msg})
+                # Log specific error
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "robot")
                 return False
 
-            robot.speed = SPEED_NORMAL
-            robot.moveto(*robot.intermediate_pos["ZHOME"])
-            print(f"Collecting stub from {origin}")
-            socketio.emit('function_response', {'result': f"Collecting stub from {origin}."})
+            # Step 2: Navigate to intermediate position
+            try:
+                robot.speed = SPEED_NORMAL
+                robot.moveto(*robot.intermediate_pos["ZHOME"])
+                print(f"Collecting stub from {origin}")
+                socketio.emit('function_response', {'result': f"Collecting stub from {origin}."})
+            except Exception as e:
+                error_msg = f"Error moving to intermediate position: {e}"
+                print(error_msg)
+                socketio.emit('function_response', {'result': error_msg})
+                # Log specific error
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "robot")
+                return False
 
+            # Step 3: Stub collection with improved error handling
             stub_pick_trials = 0
             stub_picked = False
-            control_panel_vacuum("SEM",True)
-            while True:
-                if stub_pick_trials > 2:
-                    print("Stub not picked 3 times in a row. Aborted.")
-                    socketio.emit('function_response', {'result': "Stub not picked 3 times in a row. Aborted."})
-                    control_panel_vacuum("SEM",False)
-                    break
-                else:
+            
+            try:
+                control_panel_vacuum("SEM", True)
+            except Exception as e:
+                error_msg = f"Error enabling vacuum: {e}"
+                print(error_msg)
+                socketio.emit('function_response', {'result': error_msg})
+                # Log specific error
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "PLC")
+                return False
+            
+            while stub_pick_trials <= 2:  # Changed condition for clarity
+                try:
                     print("Trying to pick the stub...")
                     socketio.emit('function_response', {'result': "Trying to pick the stub..."})
 
-                robot.moveto(*robot.clean_stub_pos[origin])
-                # Descending needle
-                robot.moveto(*robot.clean_stub_pos["STRAY_Z1"])
-                robot.speed = SPEED_LOW
-                
-                # Descending needle, slower speed
-                robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
-                robot.speed = SPEED_VLOW
-                
-                # Trying to collect stub delicately
-                robot.moveto(*robot.clean_stub_pos["STRAY_Z3"])
-                robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
-                robot.speed = SPEED_NORMAL
-                robot.moveto(*robot.intermediate_pos["ZHOME"])
-                print("Checking if stub was picked...")
-                socketio.emit('function_response', {'result': "Checking if stub was picked..."})
-                robot.moveto(*robot.equipment_pos["LASER_SEM"])
-                robot.moveto(*robot.equipment_pos["LASER_SEM_Z1"])
-
-                if control_panel_laser_status() == "LASER1":
-                    print("Stub was picked!")
-                    socketio.emit('function_response', {'result': "Stub was picked!"})
-                    stub_picked = True
+                    # Stub picking sequence
+                    robot.moveto(*robot.clean_stub_pos[origin])
+                    robot.moveto(*robot.clean_stub_pos["STRAY_Z1"])
+                    robot.speed = SPEED_LOW
+                    robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+                    robot.speed = SPEED_VLOW
+                    robot.moveto(*robot.clean_stub_pos["STRAY_Z3"])
+                    robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
+                    robot.speed = SPEED_NORMAL
                     robot.moveto(*robot.intermediate_pos["ZHOME"])
-                    break
-                else:
-                    print("Stub was not detected. Trying again...")
-                    socketio.emit('function_response', {'result': "Stub was not detected. Trying again..."})
-                    robot.moveto(*robot.intermediate_pos["ZHOME"])
-                    stub_pick_trials = stub_pick_trials+1
+                    
+                    print("Checking if stub was picked...")
+                    socketio.emit('function_response', {'result': "Checking if stub was picked..."})
+                    
+                    # Move to laser detection position
+                    robot.moveto(*robot.equipment_pos["LASER_SEM"])
+                    robot.moveto(*robot.equipment_pos["LASER_SEM_Z1"])
 
-            if stub_picked:
-                robot.moveto(*robot.intermediate_pos["ZHOME"])
+                    # Check if stub was picked
+                    if control_panel_laser_status() == "LASER1":
+                        print("Stub was picked!")
+                        socketio.emit('function_response', {'result': "Stub was picked!"})
+                        stub_picked = True
+                        robot.moveto(*robot.intermediate_pos["ZHOME"])
+                        break
+                    else:
+                        print("Stub was not detected. Trying again...")
+                        socketio.emit('function_response', {'result': "Stub was not detected. Trying again..."})
+                        robot.moveto(*robot.intermediate_pos["ZHOME"])
+                        stub_pick_trials += 1
+                        
+                except Exception as e:
+                    error_msg = f"Error during stub picking attempt {stub_pick_trials + 1}: {e}"
+                    print(error_msg)
+                    socketio.emit('function_response', {'result': error_msg})
+                    # Log specific error for each attempt
+                    if process_run_id:
+                        log_error(process_run_id, error_msg, "robot")
+                    stub_pick_trials += 1
+                    
+                    # Try to recover to safe position
+                    try:
+                        robot.speed = SPEED_NORMAL
+                        robot.moveto(*robot.intermediate_pos["ZHOME"])
+                    except:
+                        pass  # If recovery fails, we'll catch it in the outer try-except
+
+            # Check if stub picking failed
+            if not stub_picked:
+                error_msg = "Stub not picked after 3 attempts. Process failed."
+                print(error_msg)
+                socketio.emit('function_response', {'result': error_msg})
+                # Log specific error for stub picking failure
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "process")
+                try:
+                    control_panel_vacuum("SEM", False)
+                except:
+                    pass
+                return False  # Explicitly return False for failed stub picking
+
+            # Step 4: Charging and exposure process
+            try:
+                # Move to charger and position for exposure
                 robot.moveto(*robot.equipment_pos["CHARGER_SEM"])
                 robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height))
-
                 socketio.emit('function_response', {'result': f"Setting at: {MEASURED_BASE_HEIGHT - int(c_height)} mm."})
-                robot.moveto(z=MEASURED_BASE_HEIGHT -  int(c_height) + int(distance))
+                robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height) + int(distance))
                 socketio.emit('function_response', {'result': f"Exposing at: {MEASURED_BASE_HEIGHT - int(c_height) + int(distance)} mm."})
+
+                # VIBRATION MOTOR INTEGRATION - Turn on motors before exposure
+                if motor1_enabled or motor2_enabled:
+                    try:
+                        socketio.emit('function_response', {'result': "Turning on vibration motors..."})
+                        control_vibration_motors(motor1_enabled, motor2_enabled, turn_on=True)
+                        time.sleep(0.5)  # Brief delay to ensure motors are running
+                    except Exception as e:
+                        error_msg = f"Warning: Error controlling vibration motors: {e}"
+                        print(error_msg)
+                        socketio.emit('function_response', {'result': error_msg})
+                        # Log motor error but continue with process
+                        if process_run_id:
+                            log_error(process_run_id, error_msg, "PLC")
+
+                # Perform exposure
                 print(f"Stub will be exposed to {voltage} kV for {etime} ms.")
                 socketio.emit('function_response', {'result': f"Stub will be exposed to {voltage} kV for {etime} ms."})
-                control_panel_hvps_setting(voltage,etime)
+                control_panel_hvps_setting(voltage_formatted, etime_formatted)
                 time.sleep(int(etime)/1000+2)
+                
+                # VIBRATION MOTOR INTEGRATION - Turn off motors after exposure
+                if motor1_enabled or motor2_enabled:
+                    try:
+                        socketio.emit('function_response', {'result': "Turning off vibration motors..."})
+                        control_vibration_motors(motor1_enabled, motor2_enabled, turn_on=False)
+                    except Exception as e:
+                        error_msg = f"Warning: Error turning off vibration motors: {e}"
+                        print(error_msg)
+                        socketio.emit('function_response', {'result': error_msg})
+                        # Log motor error but continue
+                        if process_run_id:
+                            log_error(process_run_id, error_msg, "PLC")
+
                 robot.moveto(*robot.intermediate_pos["ZHOME"])
                 
+            except Exception as e:
+                error_msg = f"Error during charging/exposure process: {e}"
+                print(error_msg)
+                socketio.emit('function_response', {'result': error_msg})
+                # Log specific error
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "process")
+                # Ensure motors are turned off
+                try:
+                    if motor1_enabled or motor2_enabled:
+                        control_panel_vibration_motor_all_off()
+                except:
+                    pass
+                return False
+
+            # Step 5: Delivery to destination
+            try:
                 if destination == "tray":
                     print(f"Delivering stub to tray: {origin}.")
                     socketio.emit('function_response', {'result': f"Delivering stub to tray: {origin}."})
@@ -970,12 +1069,11 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
                     robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
                     robot.speed = SPEED_VLOW
                     robot.moveto(*robot.clean_stub_pos["STRAY_Z3"])
-                    control_panel_vacuum("SEM",False)
+                    control_panel_vacuum("SEM", False)
                     time.sleep(PAUSE_VAC)
                     robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
                     robot.speed = SPEED_NORMAL
                     robot.moveto(*robot.intermediate_pos["ZHOME"])
-                    #homing in X and Y only so the machine doesn't do two bed retractions
                     robot.moveto(x=robot.intermediate_pos["HOME"][0])
                     robot.moveto(y=robot.intermediate_pos["HOME"][1])
                 else:
@@ -987,11 +1085,10 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
                     control_panel_gripper_home()
 
                     robot.moveto(*robot.equipment_pos["ROTATOR_0"])
-                    #send_command("SEMPREPR155") - homing stub 155
                     robot.moveto(*robot.equipment_pos["ROTATOR_Z1"])
                     robot.speed = SPEED_VLOW
                     robot.moveto(*robot.equipment_pos["ROTATOR_ENGAGE"])
-                    control_panel_vacuum("SEM",False)
+                    control_panel_vacuum("SEM", False)
                     time.sleep(PAUSE_VAC)
                     robot.speed = SPEED_NORMAL
                     robot.moveto(*robot.intermediate_pos["ZHOME"])
@@ -1030,383 +1127,356 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination):
                     robot.moveto(x=robot.intermediate_pos["HOME"][0])
                     robot.moveto(y=robot.intermediate_pos["HOME"][1])
 
-            device_step_final(robot)
-            return True
-
-        except Exception as e:
-            print(f"Error in process: {e}")
-            socketio.emit('function_response', {'result': f"Error in process: {e}"})
-            return False
-
-    return handle_control_panel_operation(
-        lambda: handle_robot_operation(
-            _sem_operation, 
-            robot=global_robot,
-            voltage=voltage, 
-            c_height=c_height, 
-            distance=distance, 
-            etime=etime, 
-            origin=origin, 
-            destination=destination
-        )
-    )
-
-
-
-def tem_process_action(voltage, c_height, distance, etime, origin, destination, skip_laser=False):
-    def _tem_operation(robot, voltage, c_height, distance, etime, origin, destination, skip_laser):
-        try:
-            # Format voltage and time to 5 characters with leading zeros
-            voltage = f"{int(voltage):05d}"
-            etime = f"{int(etime):05d}"
-
-            print(f"TEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}")
-            socketio.emit('function_response', {'result': f"TEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}"})
-
-            try:
-                robot.gohome()
-                
-            except Exception as var_error:
-                print(f"An error occurred: {var_error}")
-                socketio.emit('function_response', {'result': f"An error occurred: {var_error}"})
+            except Exception as e:
+                error_msg = f"Error during delivery process: {e}"
+                print(error_msg)
+                socketio.emit('function_response', {'result': error_msg})
+                # Log specific error
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "robot")
                 return False
 
-            robot.speed = SPEED_NORMAL
-            robot.moveto(*robot.intermediate_pos["ZHOME"])
-            print(f"Collecting grid from {origin}")
-            socketio.emit('function_response', {'result': f"Collecting grid from {origin}."})
+            # Step 6: Final cleanup
+            try:
+                device_step_final(robot)
+                process_successful = True  # Only set to True if we reach this point
+                print("SEM process completed successfully.")
+                socketio.emit('function_response', {'result': "SEM process completed successfully."})
+                return True
+                
+            except Exception as e:
+                error_msg = f"Error in final cleanup: {e}"
+                print(error_msg)
+                socketio.emit('function_response', {'result': error_msg})
+                # Log specific error
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "robot")
+                return False
 
+        except Exception as e:
+            error_msg = f"Unexpected error in SEM process: {e}"
+            print(error_msg)
+            socketio.emit('function_response', {'result': error_msg})
+            # Log unexpected error
+            if process_run_id:
+                log_error(process_run_id, error_msg, "system")
+            # Ensure motors are turned off in case of error
+            try:
+                if motor1_enabled or motor2_enabled:
+                    control_panel_vibration_motor_all_off()
+            except:
+                pass
+            return False
+
+    # Modified wrapper call to pass process_run_id through
+    def _wrapper_with_logging():
+        return handle_robot_operation(
+            lambda robot: _sem_operation(
+                robot, voltage, c_height, distance, etime, 
+                origin, destination, motor1_enabled, motor2_enabled, process_run_id
+            ),
+            robot=global_robot
+        )
+    
+    # Call the operation with proper error handling
+    result = handle_control_panel_operation(_wrapper_with_logging)
+    
+    # Additional logging for wrapper failures (PLC/robot connection issues)
+    if result is False and process_run_id:
+        # This catches cases where handle_control_panel_operation or handle_robot_operation fail
+        log_error(process_run_id, "Process failed due to control panel or robot connection issues", "system")
+    
+    # Ensure we return the actual result
+    return result
+
+def tem_process_action(voltage, c_height, distance, etime, origin, destination, skip_laser=False, process_run_id=None, motor1_enabled=False, motor2_enabled=False):
+    def _tem_operation(robot, voltage, c_height, distance, etime, origin, destination, skip_laser, motor1_enabled, motor2_enabled, process_run_id):
+        # Initialize success flag
+        process_successful = False
+        
+        try:
+            # Format voltage and time to 5 characters with leading zeros
+            voltage_formatted = f"{int(voltage):05d}"
+            etime_formatted = f"{int(etime):05d}"
+
+            print(f"TEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}, vibMotor1={motor1_enabled}, vibMotor2={motor2_enabled}")
+            socketio.emit('function_response', {'result': f"TEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}, vibMotor1={motor1_enabled}, vibMotor2={motor2_enabled}"})
+
+            # Step 1: Home robot
+            try:
+                robot.gohome()
+            except Exception as var_error:
+                error_msg = f"An error occurred when trying to home robot: {var_error}"
+                print(error_msg)
+                socketio.emit('function_response', {'result': error_msg})
+                # Log specific error
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "robot")
+                return False
+
+            # Step 2: Navigate to intermediate position
+            try:
+                robot.speed = SPEED_NORMAL
+                robot.moveto(*robot.intermediate_pos["ZHOME"])
+                print(f"Collecting grid from {origin}")
+                socketio.emit('function_response', {'result': f"Collecting grid from {origin}."})
+            except Exception as e:
+                error_msg = f"Error moving to intermediate position: {e}"
+                print(error_msg)
+                socketio.emit('function_response', {'result': error_msg})
+                # Log specific error
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "robot")
+                return False
+
+            # Step 3: Grid collection with improved error handling
             grid_pick_trials = 0
             grid_picked = False
 
-            
-            # Modified grid picking logic
             if skip_laser:
-                print("Skipping laser verification - assuming grid was picked successfully")
-                socketio.emit('function_response', {'result': "Skipping laser verification - assuming grid was picked successfully"})
-                
-                robot.moveto(x=robot.clean_disk_pos[origin][0])
-                control_panel_tem_grid_holder_open()
-                time.sleep(1.5)
-                control_panel_vacuum("TEM",True)
-                robot.moveto(*robot.clean_disk_pos[origin])
-                robot.moveto(*robot.clean_disk_pos["TCTRAY_Z1"])
-                robot.speed = SPEED_LOW
-                robot.moveto(*robot.clean_disk_pos["TCTRAY_Z2"])
-                robot.speed = SPEED_VLOW
-                robot.moveto(*robot.clean_disk_pos["TCTRAY_Z3"])
-                robot.moveto(*robot.clean_disk_pos["TCTRAY_Z2"])
-                robot.speed = SPEED_NORMAL
-                robot.moveto(*robot.intermediate_pos["ZHOME"])
-                
-                grid_picked = True
-            else:
-                while True:
-                    if grid_pick_trials > 2:
-                        print("Grid not picked 3 times in a row. Aborted.")
-                        socketio.emit('function_response', {'result': "Grid not picked 3 times in a row. Aborted."})
-                        control_panel_vacuum("TEM",False)
-                        robot.moveto(*robot.intermediate_pos["ZHOME"])
-                        time.sleep(1)
-                        control_panel_tem_grid_holder_close()
-                        time.sleep(1.5)
-                        break
-                    else:
-                        print("Trying to pick the grid...")
-                        socketio.emit('function_response', {'result': "Trying to pick the grid..."})
-
+                # Skip laser verification path
+                try:
+                    print("Skipping laser verification - assuming grid was picked successfully")
+                    socketio.emit('function_response', {'result': "Skipping laser verification - assuming grid was picked successfully"})
+                    
                     robot.moveto(x=robot.clean_disk_pos[origin][0])
                     control_panel_tem_grid_holder_open()
                     time.sleep(1.5)
-                    control_panel_vacuum("TEM",True)
+                    control_panel_vacuum("TEM", True)
                     robot.moveto(*robot.clean_disk_pos[origin])
-                    # Descending needle
                     robot.moveto(*robot.clean_disk_pos["TCTRAY_Z1"])
                     robot.speed = SPEED_LOW
-                    
-                    # Descending needle, slower speed
                     robot.moveto(*robot.clean_disk_pos["TCTRAY_Z2"])
                     robot.speed = SPEED_VLOW
-                    
-                    # Trying to collect grid delicately
                     robot.moveto(*robot.clean_disk_pos["TCTRAY_Z3"])
                     robot.moveto(*robot.clean_disk_pos["TCTRAY_Z2"])
                     robot.speed = SPEED_NORMAL
                     robot.moveto(*robot.intermediate_pos["ZHOME"])
-                    print("Checking if grid was picked...")
-                    socketio.emit('function_response', {'result': "Checking if grid was picked..."})
-                    robot.moveto(*robot.equipment_pos["LASER_TEM"])
-                    robot.moveto(*robot.equipment_pos["LASER_TEM_Z1"])
-
-                    if control_panel_laser_status() == "LASER1":
-                        print("Grid was picked!")
-                        socketio.emit('function_response', {'result': "Grid was picked!"})
-                        grid_picked = True
-                        robot.moveto(*robot.intermediate_pos["ZHOME"])
-                        break
-                    else:
-                        print("Grid was not detected. Trying again...")
-                        socketio.emit('function_response', {'result': "Grid was not detected. Trying again..."})
-                        robot.moveto(*robot.intermediate_pos["ZHOME"])
-                        grid_pick_trials = grid_pick_trials + 1
-
-            if grid_picked:
-                robot.moveto(*robot.intermediate_pos["ZHOME"])
-                time.sleep(1)
-                control_panel_tem_grid_holder_close()
-                time.sleep(1)
-                robot.moveto(*robot.equipment_pos["CHARGER_TEM"])
-                robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height))
-
-                socketio.emit('function_response', {'result': f"Setting at: {MEASURED_BASE_HEIGHT - int(c_height)} mm."})
-                robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height) + int(distance))
-                socketio.emit('function_response', {'result': f"Exposing at: {MEASURED_BASE_HEIGHT - int(c_height) + int(distance)} mm."})
-                print(f"Grid will be exposed to {voltage} kV for {etime} ms.")
-                socketio.emit('function_response', {'result': f"Grid will be exposed to {voltage} kV for {etime} ms."})
-                control_panel_hvps_setting(voltage,etime)
-                time.sleep(int(etime)/1000+2)
-                robot.moveto(*robot.intermediate_pos["ZHOME"])
-                
-                print(f"Delivering grid to {destination}.")
-                socketio.emit('function_response', {'result': f"Delivering grid to {destination}."})
-                #Moving X and Y separatelyto ensure the grid never passes over another grid to avoid cross-contamination:
-                robot.moveto(x=robot.used_disk_pos[destination][0])
-                control_panel_tem_grid_holder_open()
-                time.sleep(1)
-                robot.moveto(y=robot.used_disk_pos[destination][1])
-                robot.moveto(*robot.used_disk_pos["TETRAY_Z1"])
-                robot.speed = SPEED_LOW
-                robot.moveto(*robot.used_disk_pos["TETRAY_Z2"])
-                robot.speed = SPEED_VLOW
-                robot.moveto(*robot.used_disk_pos["TETRAY_Z3"])
-                control_panel_vacuum("TEM",False)
-                time.sleep(PAUSE_VAC)
-                robot.moveto(*robot.used_disk_pos["TETRAY_Z2"])
-                robot.speed = SPEED_NORMAL
-                robot.moveto(*robot.intermediate_pos["ZHOME"])
-                time.sleep(1)
-                control_panel_tem_grid_holder_close()
-                time.sleep(1)
-                #homing in X and Y only so the machine doesn't do two bed retractions
-                robot.moveto(x=robot.intermediate_pos["HOME"][0])
-                robot.moveto(y=robot.intermediate_pos["HOME"][1])
-                
-
-            device_step_final(robot)
-
-            return True
-
-        except Exception as e:
-            print(f"Error in process: {e}")
-            socketio.emit('function_response', {'result': f"Error in process: {e}"})
-            return False
-
-    return handle_control_panel_operation(
-        lambda: handle_robot_operation(
-            _tem_operation, 
-            robot=global_robot,
-            voltage=voltage, 
-            c_height=c_height, 
-            distance=distance, 
-            etime=etime, 
-            origin=origin, 
-            destination=destination,
-            skip_laser=skip_laser
-        )
-    )
-
-'''
-#endregion
-
-def sem_process_action(voltage, c_height, distance, etime, origin, destination, process_run_id=None, motor1_enabled=False, motor2_enabled=False):
-    """
-    Consolidated SEM process action with database logging and vibration motor support.
-    This replaces both sem_process_action and enhanced_sem_process_action.
-    """
-    def _sem_operation(robot, voltage, c_height, distance, etime, origin, destination, motor1_enabled, motor2_enabled):
-        try:
-            # Format voltage and time to 5 characters with leading zeros
-            voltage_formatted = f"{int(voltage):05d}"
-            etime_formatted = f"{int(etime):05d}"
-
-            print(f"SEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}")
-            if motor1_enabled or motor2_enabled:
-                print(f"Vibration motors: Motor1={motor1_enabled}, Motor2={motor2_enabled}")
-            socketio.emit('function_response', {'result': f"SEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}"})
-
-            try:
-                robot.gohome()
-            except Exception as var_error:
-                print(f"An error occurred: {var_error}")
-                socketio.emit('function_response', {'result': f"An error occurred: {var_error}"})
-                return False
-
-            robot.speed = SPEED_NORMAL
-            robot.moveto(*robot.intermediate_pos["ZHOME"])
-            print(f"Collecting stub from {origin}")
-            socketio.emit('function_response', {'result': f"Collecting stub from {origin}."})
-
-            # Stub collection logic (your existing code)
-            robot.moveto(*robot.clean_stub_pos[origin])
-            robot.moveto(*robot.clean_stub_pos["STRAY_Z1"])
-            robot.speed = SPEED_LOW
-            robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
-            robot.speed = SPEED_VLOW
-            robot.moveto(*robot.clean_stub_pos["STRAY_Z3"])
-            control_panel_vacuum("SEM", True)
-            time.sleep(PAUSE_VAC)
-            robot.speed = SPEED_NORMAL
-            robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
-            robot.moveto(*robot.clean_stub_pos["STRAY_Z1"])
-            robot.moveto(*robot.intermediate_pos["ZHOME"])
-
-            # Move to charger and position for exposure
-            robot.moveto(*robot.equipment_pos["CHARGER_SEM"])
-            robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height))
-            socketio.emit('function_response', {'result': f"Setting at: {MEASURED_BASE_HEIGHT - int(c_height)} mm."})
-            robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height) + int(distance))
-            socketio.emit('function_response', {'result': f"Exposing at: {MEASURED_BASE_HEIGHT - int(c_height) + int(distance)} mm."})
-
-            # VIBRATION MOTOR INTEGRATION - Turn on motors before exposure
-            if motor1_enabled or motor2_enabled:
-                socketio.emit('function_response', {'result': "Turning on vibration motors..."})
-                control_vibration_motors(motor1_enabled, motor2_enabled, turn_on=True)
-                time.sleep(0.5)  # Brief delay to ensure motors are running
-
-            # Perform exposure
-            print(f"Stub will be exposed to {voltage} kV for {etime} ms.")
-            socketio.emit('function_response', {'result': f"Stub will be exposed to {voltage} kV for {etime} ms."})
-            control_panel_hvps_setting(voltage_formatted, etime_formatted)
-            time.sleep(int(etime)/1000+2)
-            
-            # VIBRATION MOTOR INTEGRATION - Turn off motors after exposure
-            if motor1_enabled or motor2_enabled:
-                socketio.emit('function_response', {'result': "Turning off vibration motors..."})
-                control_vibration_motors(motor1_enabled, motor2_enabled, turn_on=False)
-
-            robot.moveto(*robot.intermediate_pos["ZHOME"])
-            
-            # Delivery logic (your existing code)
-            if destination == "tray":
-                print(f"Delivering stub to tray: {origin}.")
-                socketio.emit('function_response', {'result': f"Delivering stub to tray: {origin}."})
-                robot.moveto(*robot.clean_stub_pos[origin])
-                robot.moveto(*robot.clean_stub_pos["STRAY_Z1"])
-                robot.speed = SPEED_LOW
-                robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
-                robot.speed = SPEED_VLOW
-                robot.moveto(*robot.clean_stub_pos["STRAY_Z3"])
-                control_panel_vacuum("SEM", False)
-                time.sleep(PAUSE_VAC)
-                robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
-                robot.speed = SPEED_NORMAL
-                robot.moveto(*robot.intermediate_pos["ZHOME"])
-                robot.moveto(x=robot.intermediate_pos["HOME"][0])
-                robot.moveto(y=robot.intermediate_pos["HOME"][1])
+                    
+                    grid_picked = True
+                    
+                except Exception as e:
+                    error_msg = f"Error during grid collection (skip laser mode): {e}"
+                    print(error_msg)
+                    socketio.emit('function_response', {'result': error_msg})
+                    # Log specific error
+                    if process_run_id:
+                        log_error(process_run_id, error_msg, "robot")
+                    # Clean up on error
+                    try:
+                        control_panel_vacuum("TEM", False)
+                        control_panel_tem_grid_holder_close()
+                    except:
+                        pass
+                    return False
             else:
-                # Handle other destinations...
-                print(f"Delivering stub to stage: {destination}.")
-                socketio.emit('function_response', {'result': f"Delivering stub to stage: {destination}."})
-                # Add your stage delivery logic here
+                # Normal grid collection with laser verification
+                try:
+                    control_panel_vacuum("TEM", True)
+                except Exception as e:
+                    error_msg = f"Error enabling TEM vacuum: {e}"
+                    print(error_msg)
+                    socketio.emit('function_response', {'result': error_msg})
+                    # Log specific error
+                    if process_run_id:
+                        log_error(process_run_id, error_msg, "PLC")
+                    return False
+                
+                while grid_pick_trials <= 2:  # Changed condition for clarity
+                    try:
+                        print("Trying to pick the grid...")
+                        socketio.emit('function_response', {'result': "Trying to pick the grid..."})
 
-            device_step_final(robot)
-            return True
+                        # Grid picking sequence
+                        robot.moveto(x=robot.clean_disk_pos[origin][0])
+                        control_panel_tem_grid_holder_open()
+                        time.sleep(1.5)
+                        robot.moveto(*robot.clean_disk_pos[origin])
+                        robot.moveto(*robot.clean_disk_pos["TCTRAY_Z1"])
+                        robot.speed = SPEED_LOW
+                        robot.moveto(*robot.clean_disk_pos["TCTRAY_Z2"])
+                        robot.speed = SPEED_VLOW
+                        robot.moveto(*robot.clean_disk_pos["TCTRAY_Z3"])
+                        robot.moveto(*robot.clean_disk_pos["TCTRAY_Z2"])
+                        robot.speed = SPEED_NORMAL
+                        robot.moveto(*robot.intermediate_pos["ZHOME"])
+                        
+                        print("Checking if grid was picked...")
+                        socketio.emit('function_response', {'result': "Checking if grid was picked..."})
+                        
+                        # Move to laser detection position
+                        robot.moveto(*robot.equipment_pos["LASER_TEM"])
+                        robot.moveto(*robot.equipment_pos["LASER_TEM_Z1"])
 
-        except Exception as e:
-            print(f"Error in SEM process: {e}")
-            socketio.emit('function_response', {'result': f"Error in SEM process: {e}"})
-            # Ensure motors are turned off in case of error
+                        # Check if grid was picked
+                        if control_panel_laser_status() == "LASER1":
+                            print("Grid was picked!")
+                            socketio.emit('function_response', {'result': "Grid was picked!"})
+                            grid_picked = True
+                            robot.moveto(*robot.intermediate_pos["ZHOME"])
+                            break
+                        else:
+                            print("Grid was not detected. Trying again...")
+                            socketio.emit('function_response', {'result': "Grid was not detected. Trying again..."})
+                            robot.moveto(*robot.intermediate_pos["ZHOME"])
+                            grid_pick_trials += 1
+                            
+                    except Exception as e:
+                        error_msg = f"Error during grid picking attempt {grid_pick_trials + 1}: {e}"
+                        print(error_msg)
+                        socketio.emit('function_response', {'result': error_msg})
+                        # Log specific error for each attempt
+                        if process_run_id:
+                            log_error(process_run_id, error_msg, "robot")
+                        grid_pick_trials += 1
+                        
+                        # Try to recover to safe position
+                        try:
+                            robot.speed = SPEED_NORMAL
+                            robot.moveto(*robot.intermediate_pos["ZHOME"])
+                        except:
+                            pass  # If recovery fails, we'll catch it in the outer try-except
+
+                # Check if grid picking failed after all attempts
+                if not grid_picked:
+                    error_msg = "Grid not picked after 3 attempts. Process failed."
+                    print(error_msg)
+                    socketio.emit('function_response', {'result': error_msg})
+                    # Log specific error for grid picking failure
+                    if process_run_id:
+                        log_error(process_run_id, error_msg, "process")
+                    # Clean up on failure
+                    try:
+                        control_panel_vacuum("TEM", False)
+                        robot.moveto(*robot.intermediate_pos["ZHOME"])
+                        time.sleep(1)
+                        control_panel_tem_grid_holder_close()
+                        time.sleep(1.5)
+                    except:
+                        pass
+                    return False  # Explicitly return False for failed grid picking
+
+            # Step 4: Charging and exposure process
+            if grid_picked:
+                try:
+                    # Move to charger and position for exposure
+                    robot.moveto(*robot.equipment_pos["CHARGER_TEM"])
+                    robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height))
+                    socketio.emit('function_response', {'result': f"Setting at: {MEASURED_BASE_HEIGHT - int(c_height)} mm."})
+                    robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height) + int(distance))
+                    socketio.emit('function_response', {'result': f"Exposing at: {MEASURED_BASE_HEIGHT - int(c_height) + int(distance)} mm."})
+
+                    # VIBRATION MOTOR INTEGRATION - Turn on motors before exposure
+                    if motor1_enabled or motor2_enabled:
+                        try:
+                            socketio.emit('function_response', {'result': "Turning on vibration motors..."})
+                            control_vibration_motors(motor1_enabled, motor2_enabled, turn_on=True)
+                            time.sleep(0.5)  # Brief delay to ensure motors are running
+                        except Exception as e:
+                            error_msg = f"Warning: Error controlling vibration motors: {e}"
+                            print(error_msg)
+                            socketio.emit('function_response', {'result': error_msg})
+                            # Log motor error but continue with process
+                            if process_run_id:
+                                log_error(process_run_id, error_msg, "PLC")
+
+                    # Perform exposure
+                    print(f"Grid will be exposed to {voltage} kV for {etime} ms.")
+                    socketio.emit('function_response', {'result': f"Grid will be exposed to {voltage} kV for {etime} ms."})
+                    control_panel_hvps_setting(voltage_formatted, etime_formatted)
+                    time.sleep(int(etime)/1000+2)
+                    
+                    # VIBRATION MOTOR INTEGRATION - Turn off motors after exposure
+                    if motor1_enabled or motor2_enabled:
+                        try:
+                            print(f"Turning off vibration motors...")
+                            socketio.emit('function_response', {'result': "Turning off vibration motors..."})
+                            control_vibration_motors(motor1_enabled, motor2_enabled, turn_on=False)
+                        except Exception as e:
+                            error_msg = f"Warning: Error turning off vibration motors: {e}"
+                            print(error_msg)
+                            socketio.emit('function_response', {'result': error_msg})
+                            # Log motor error but continue
+                            if process_run_id:
+                                log_error(process_run_id, error_msg, "PLC")
+
+                    robot.moveto(*robot.intermediate_pos["ZHOME"])
+                    
+                except Exception as e:
+                    error_msg = f"Error during charging/exposure process: {e}"
+                    print(error_msg)
+                    socketio.emit('function_response', {'result': error_msg})
+                    # Log specific error
+                    if process_run_id:
+                        log_error(process_run_id, error_msg, "process")
+                    # Ensure motors are turned off
+                    try:
+                        if motor1_enabled or motor2_enabled:
+                            control_panel_vibration_motor_all_off()
+                    except:
+                        pass
+                    return False
+
+                # Step 5: Delivery to destination
+                try:
+                    print(f"Delivering grid to {destination}.")
+                    socketio.emit('function_response', {'result': f"Delivering grid to {destination}."})
+                    
+                    # Moving X and Y separately to ensure the grid never passes over another grid to avoid cross-contamination
+                    robot.moveto(x=robot.used_disk_pos[destination][0])
+                    control_panel_tem_grid_holder_open()
+                    time.sleep(1)
+                    robot.moveto(y=robot.used_disk_pos[destination][1])
+                    robot.moveto(*robot.used_disk_pos["TETRAY_Z1"])
+                    robot.speed = SPEED_LOW
+                    robot.moveto(*robot.used_disk_pos["TETRAY_Z2"])
+                    robot.speed = SPEED_VLOW
+                    robot.moveto(*robot.used_disk_pos["TETRAY_Z3"])
+                    control_panel_vacuum("TEM", False)
+                    time.sleep(PAUSE_VAC)
+                    robot.moveto(*robot.used_disk_pos["TETRAY_Z2"])
+                    robot.speed = SPEED_NORMAL
+                    robot.moveto(*robot.intermediate_pos["ZHOME"])
+                    time.sleep(1)
+                    control_panel_tem_grid_holder_close()
+                    time.sleep(1)
+                    # Homing in X and Y only so the machine doesn't do two bed retractions
+                    robot.moveto(x=robot.intermediate_pos["HOME"][0])
+                    robot.moveto(y=robot.intermediate_pos["HOME"][1])
+
+                except Exception as e:
+                    error_msg = f"Error during delivery process: {e}"
+                    print(error_msg)
+                    socketio.emit('function_response', {'result': error_msg})
+                    # Log specific error
+                    if process_run_id:
+                        log_error(process_run_id, error_msg, "robot")
+                    return False
+
+            # Step 6: Final cleanup
             try:
-                if motor1_enabled or motor2_enabled:
-                    control_panel_vibration_motor_all_off()
-            except:
-                pass
-            return False
-
-    return handle_control_panel_operation(
-        lambda: handle_robot_operation(
-            _sem_operation, 
-            robot=global_robot,
-            voltage=voltage, 
-            c_height=c_height, 
-            distance=distance, 
-            etime=etime, 
-            origin=origin, 
-            destination=destination,
-            motor1_enabled=motor1_enabled,
-            motor2_enabled=motor2_enabled
-        )
-    )
-
-# Replace your existing tem_process_action and enhanced_tem_process_action with this single function:
-
-def tem_process_action(voltage, c_height, distance, etime, origin, destination, skip_laser=False, process_run_id=None, motor1_enabled=False, motor2_enabled=False):
-    """
-    Consolidated TEM process action with database logging and vibration motor support.
-    This replaces both tem_process_action and enhanced_tem_process_action.
-    """
-    def _tem_operation(robot, voltage, c_height, distance, etime, origin, destination, skip_laser, motor1_enabled, motor2_enabled):
-        try:
-            # Format voltage and time to 5 characters with leading zeros
-            voltage_formatted = f"{int(voltage):05d}"
-            etime_formatted = f"{int(etime):05d}"
-
-            print(f"TEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}")
-            if motor1_enabled or motor2_enabled:
-                print(f"Vibration motors: Motor1={motor1_enabled}, Motor2={motor2_enabled}")
-            socketio.emit('function_response', {'result': f"TEM TRAY requested. Values: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}"})
-
-            try:
-                robot.gohome()
-            except Exception as var_error:
-                print(f"An error occurred: {var_error}")
-                socketio.emit('function_response', {'result': f"An error occurred: {var_error}"})
+                device_step_final(robot)
+                process_successful = True  # Only set to True if we reach this point
+                print("TEM process completed successfully.")
+                socketio.emit('function_response', {'result': "TEM process completed successfully."})
+                return True
+                
+            except Exception as e:
+                error_msg = f"Error in final cleanup: {e}"
+                print(error_msg)
+                socketio.emit('function_response', {'result': error_msg})
+                # Log specific error
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "robot")
                 return False
 
-            robot.speed = SPEED_NORMAL
-            robot.moveto(*robot.intermediate_pos["ZHOME"])
-            print(f"Collecting grid from {origin}")
-            socketio.emit('function_response', {'result': f"Collecting grid from {origin}."})
-
-            # Your existing TEM grid collection logic here...
-            # (Add your full TEM collection, positioning, and delivery logic)
-
-            # Position for exposure
-            robot.moveto(*robot.equipment_pos["CHARGER_TEM"])
-            robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height))
-            socketio.emit('function_response', {'result': f"Setting at: {MEASURED_BASE_HEIGHT - int(c_height)} mm."})
-            robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height) + int(distance))
-            socketio.emit('function_response', {'result': f"Exposing at: {MEASURED_BASE_HEIGHT - int(c_height) + int(distance)} mm."})
-
-            # VIBRATION MOTOR INTEGRATION - Turn on motors before exposure
-            if motor1_enabled or motor2_enabled:
-                socketio.emit('function_response', {'result': "Turning on vibration motors..."})
-                control_vibration_motors(motor1_enabled, motor2_enabled, turn_on=True)
-                time.sleep(0.5)  # Brief delay to ensure motors are running
-
-            # Perform exposure
-            print(f"Grid will be exposed to {voltage} kV for {etime} ms.")
-            socketio.emit('function_response', {'result': f"Grid will be exposed to {voltage} kV for {etime} ms."})
-            control_panel_hvps_setting(voltage_formatted, etime_formatted)
-            time.sleep(int(etime)/1000+2)
-            
-            # VIBRATION MOTOR INTEGRATION - Turn off motors after exposure
-            if motor1_enabled or motor2_enabled:
-                socketio.emit('function_response', {'result': "Turning off vibration motors..."})
-                control_vibration_motors(motor1_enabled, motor2_enabled, turn_on=False)
-
-            robot.moveto(*robot.intermediate_pos["ZHOME"])
-            
-            # Your existing delivery logic here...
-            print(f"Delivering grid to {destination}.")
-            socketio.emit('function_response', {'result': f"Delivering grid to {destination}."})
-
-            device_step_final(robot)
-            return True
-
         except Exception as e:
-            print(f"Error in TEM process: {e}")
-            socketio.emit('function_response', {'result': f"Error in TEM process: {e}"})
+            error_msg = f"Unexpected error in TEM process: {e}"
+            print(error_msg)
+            socketio.emit('function_response', {'result': error_msg})
+            # Log unexpected error
+            if process_run_id:
+                log_error(process_run_id, error_msg, "system")
             # Ensure motors are turned off in case of error
             try:
                 if motor1_enabled or motor2_enabled:
@@ -1415,21 +1485,26 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination, 
                 pass
             return False
 
-    return handle_control_panel_operation(
-        lambda: handle_robot_operation(
-            _tem_operation, 
-            robot=global_robot,
-            voltage=voltage, 
-            c_height=c_height, 
-            distance=distance, 
-            etime=etime, 
-            origin=origin, 
-            destination=destination,
-            skip_laser=skip_laser,
-            motor1_enabled=motor1_enabled,
-            motor2_enabled=motor2_enabled
+    # Modified wrapper call to pass process_run_id through
+    def _wrapper_with_logging():
+        return handle_robot_operation(
+            lambda robot: _tem_operation(
+                robot, voltage, c_height, distance, etime, 
+                origin, destination, skip_laser, motor1_enabled, motor2_enabled, process_run_id
+            ),
+            robot=global_robot
         )
-    )
+    
+    # Call the operation with proper error handling
+    result = handle_control_panel_operation(_wrapper_with_logging)
+    
+    # Additional logging for wrapper failures (PLC/robot connection issues)
+    if result is False and process_run_id:
+        # This catches cases where handle_control_panel_operation or handle_robot_operation fail
+        log_error(process_run_id, "Process failed due to control panel or robot connection issues", "system")
+    
+    # Ensure we return the actual result
+    return result
 
 def tem_manual_prepare():
     """
@@ -4133,27 +4208,30 @@ def advanced_manual_control():
 
 @app.route('/stats')
 def stats_dashboard():
-    """Statistics dashboard using template."""
+    """Enhanced statistics dashboard using template with recent operations."""
     try:
-        # Gather all statistics data
+        # Gather all existing statistics data
         success_rates = get_success_rate_by_process_type(30)  # Last 30 days
         common_errors = get_most_common_errors(10)
         process_counts = get_process_counts_by_time_period('day', 7)  # Last 7 days
         error_categories = get_error_categories_summary()
         
-        # Calculate summary statistics
+        # Calculate summary statistics (your existing function)
         summary = calculate_summary_stats(success_rates, error_categories)
         
         # Add performance metrics and component reliability
         performance_metrics = get_performance_metrics()
         component_reliability = get_component_reliability()
         
-        # Add percentage calculation for error categories
+        # Get new recent operations data
+        recent_operations = get_recent_operations_with_details(10)
+        
+        # Add percentage calculation for error categories (your existing logic)
         total_errors = sum(cat['count'] for cat in error_categories)
         for category in error_categories:
             category['percentage'] = (category['count'] / total_errors * 100) if total_errors > 0 else 0
         
-        # Render the template with all data
+        # Render the template with all data (existing + new)
         return render_template('stats.html',
                              success_rates=success_rates,
                              common_errors=common_errors,
@@ -4161,6 +4239,7 @@ def stats_dashboard():
                              error_categories=error_categories,
                              performance_metrics=performance_metrics,
                              component_reliability=component_reliability,
+                             recent_operations=recent_operations,  # NEW: Recent operations data
                              summary=summary,
                              last_updated=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         
@@ -4173,6 +4252,7 @@ def stats_dashboard():
                              error_categories=[],
                              performance_metrics=[],
                              component_reliability=[],
+                             recent_operations=[],  # NEW: Empty recent operations
                              summary={},
                              last_updated=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                              error_message=str(e))
@@ -5412,6 +5492,33 @@ def original_dispatch_action(data):
 '''
 #endregion
 
+def determine_success(result):
+    """
+    Determine if a function result indicates success.
+    
+    Args:
+        result: Function return value (bool, str, or other)
+    
+    Returns:
+        bool: True if successful, False if failed
+    """
+    # Explicit boolean False indicates failure
+    if result is False:
+        return False
+    
+    # Explicit boolean True indicates success
+    if result is True:
+        return True
+    
+    # For string results, check for error indicators
+    if isinstance(result, str):
+        error_indicators = ["error", "failed", "timeout", "no response", "aborted", "not ready"]
+        return not any(indicator in result.lower() for indicator in error_indicators)
+    
+    # For other types (None, numbers, objects), consider them as success
+    # unless they are falsy values
+    return bool(result)
+
 def dispatch_action(data):
     """
     Consolidated dispatch_action with soak test blocking, database logging, and vibration motor support.
@@ -5478,10 +5585,6 @@ def dispatch_action(data):
             result = action_function(identifier)
             
         elif function_type == 'sem_process':
-            # Extract vibration motor parameters
-            motor1_enabled = data.get('sem_motor1_enabled') == 'true'
-            motor2_enabled = data.get('sem_motor2_enabled') == 'true'
-            
             result = action_function(
                 voltage=data.get('voltage'),
                 c_height=data.get('c_height'),
@@ -5490,16 +5593,11 @@ def dispatch_action(data):
                 origin=data.get('origin'),
                 destination=data.get('destination'),
                 process_run_id=process_run_id,
-                motor1_enabled=motor1_enabled,
-                motor2_enabled=motor2_enabled
+                motor1_enabled=data.get('motor1_enabled', False),
+                motor2_enabled=data.get('motor2_enabled', False)
             )
             
         elif function_type == 'tem_process':
-            # Extract vibration motor parameters (TEM page uses same IDs as SEM)
-            motor1_enabled = data.get('sem_motor1_enabled') == 'true'
-            motor2_enabled = data.get('sem_motor2_enabled') == 'true'
-            skip_laser = data.get('skip_laser_verification') == 'on'
-            
             result = action_function(
                 voltage=data.get('voltage'),
                 c_height=data.get('c_height'),
@@ -5507,44 +5605,32 @@ def dispatch_action(data):
                 etime=data.get('time'),
                 origin=data.get('origin'),
                 destination=data.get('destination'),
-                skip_laser=skip_laser,
+                skip_laser=data.get('skip_laser', False),
                 process_run_id=process_run_id,
-                motor1_enabled=motor1_enabled,
-                motor2_enabled=motor2_enabled
+                motor1_enabled=data.get('motor1_enabled', False),
+                motor2_enabled=data.get('motor2_enabled', False)
             )
             
-        elif function_type == 'tem_manual_expose':
-            # Extract vibration motor parameters for manual TEM
-            motor1_enabled = data.get('motor1_enabled') == 'true'
-            motor2_enabled = data.get('motor2_enabled') == 'true'
-            
-            result = action_function(
-                voltage=data.get('voltage'),
-                c_height=data.get('c_height'),
-                distance=data.get('distance'),
-                time=data.get('time'),
-                motor1_enabled=motor1_enabled,
-                motor2_enabled=motor2_enabled
-            )
-            
-        elif function_type == 'tem_manual_prepare':
-            result = action_function(process_run_id=process_run_id)
-            
-        elif function_type == 'tem_manual_complete':
-            result = action_function(process_run_id=process_run_id)
-            
-        elif function_type in ['c3dp_test_connectivity_machine_test_page']:
-            result = action_function()
-            
-        elif function_type == 'control_panel_get_macstat':
-            result = action_function(process_run_id=process_run_id)
-            
-        elif function_type in ['device_extend_bed', 'device_retract_bed']:
-            result = action_function(process_run_id=process_run_id)
-            
+        elif function_type in ['tem_manual_prepare', 'tem_manual_expose', 'tem_manual_complete']:
+            if function_type == 'tem_manual_expose':
+                result = action_function(
+                    voltage=data.get('voltage'),
+                    c_height=data.get('c_height'),
+                    distance=data.get('distance'),
+                    time=data.get('time'),
+                    process_run_id=process_run_id,
+                    motor1_enabled=data.get('motor1_enabled', False),
+                    motor2_enabled=data.get('motor2_enabled', False)
+                )
+            else:
+                result = action_function(process_run_id=process_run_id)
+                
         elif function_type == 'robot_manual_move':
             result = action_function(
-                data.get('x'), data.get('y'), data.get('z'), data.get('c3dp_speed')
+                x=data.get('x'),
+                y=data.get('y'),
+                z=data.get('z'),
+                c3dp_speed=data.get('c3dp_speed')
             )
             
         elif function_type == 'send_manual_plc_command':
@@ -5554,10 +5640,9 @@ def dispatch_action(data):
             # For all other functions, call them without extra parameters
             result = action_function()
         
-        # Log successful completion
+        # Log completion using improved success determination
         if process_run_id and current_process_runs.get(process_run_id):
-            # Check if result indicates success (you may need to adjust this logic)
-            success = not (isinstance(result, str) and ("error" in result.lower() or "failed" in result.lower()))
+            success = determine_success(result)  # Use the new success determination function
             
             if success:
                 end_process_run(process_run_id, True, "Success", time.time() - start_time)
@@ -5582,7 +5667,6 @@ def dispatch_action(data):
             log_standalone_error(error_msg, "application")
         
         return error_msg
-
 
 def determine_process_type(function_type, data):
     """Determine the process type for logging purposes."""
