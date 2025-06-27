@@ -700,7 +700,279 @@ def get_time_ago(dt):
         return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
     else:
         return "Just now"
-    
+
+def create_position_tracking_tables():
+    """Create tables for tracking SEM and TEM positions and system state."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # SEM positions tracking table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sem_positions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    position_name TEXT NOT NULL UNIQUE,
+                    position_type TEXT NOT NULL, -- 'tray' or 'stage'
+                    status TEXT NOT NULL, -- 'empty', 'clean_stub', 'used_stub'
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # TEM positions tracking table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS tem_positions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    position_name TEXT NOT NULL UNIQUE,
+                    status TEXT NOT NULL, -- 'empty', 'clean_disk', 'used_disk'
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # System state tracking table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS system_state (
+                    id INTEGER PRIMARY KEY,
+                    current_state TEXT NOT NULL, -- 'idle', 'running', 'error'
+                    last_operation TEXT,
+                    last_error_message TEXT,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Initialize system state if it doesn't exist
+            cursor.execute("""
+                INSERT OR IGNORE INTO system_state (id, current_state, last_operation)
+                VALUES (1, 'idle', 'system_startup')
+            """)
+            
+            conn.commit()
+            print("Position tracking tables created successfully")
+            
+    except Exception as e:
+        print(f"Error creating position tracking tables: {e}")
+
+def initialize_sem_positions():
+    """Initialize SEM positions from your CSV files."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Get position names from your existing CSV data
+            # You'll need to import your position reading functions
+            from app import SamplePrepEnder3
+            
+            # Initialize tray positions
+            if hasattr(SamplePrepEnder3, 'clean_stub_pos'):
+                for position_name in SamplePrepEnder3.clean_stub_pos.keys():
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO sem_positions (position_name, position_type, status)
+                        VALUES (?, 'tray', 'empty')
+                    """, (position_name,))
+            
+            # Initialize stage positions  
+            if hasattr(SamplePrepEnder3, 'phenom_stub_pos'):
+                for position_name in SamplePrepEnder3.phenom_stub_pos.keys():
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO sem_positions (position_name, position_type, status)
+                        VALUES (?, 'stage', 'empty')
+                    """, (position_name,))
+            
+            conn.commit()
+            print("SEM positions initialized")
+            
+    except Exception as e:
+        print(f"Error initializing SEM positions: {e}")
+
+def initialize_tem_positions():
+    """Initialize TEM positions from your CSV files."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Get position names from your existing CSV data
+            from app import SamplePrepEnder3
+            
+            # Initialize clean disk positions
+            if hasattr(SamplePrepEnder3, 'clean_disk_pos'):
+                for position_name in SamplePrepEnder3.clean_disk_pos.keys():
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO tem_positions (position_name, status)
+                        VALUES (?, 'empty')
+                    """, (position_name,))
+            
+            # Initialize used disk positions
+            if hasattr(SamplePrepEnder3, 'used_disk_pos'):
+                for position_name in SamplePrepEnder3.used_disk_pos.keys():
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO tem_positions (position_name, status)
+                        VALUES (?, 'empty')
+                    """, (position_name,))
+            
+            conn.commit()
+            print("TEM positions initialized")
+            
+    except Exception as e:
+        print(f"Error initializing TEM positions: {e}")
+
+def update_system_state(state, operation=None, error_message=None):
+    """Update the current system state."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                UPDATE system_state 
+                SET current_state = ?, 
+                    last_operation = COALESCE(?, last_operation),
+                    last_error_message = ?,
+                    last_updated = ?
+                WHERE id = 1
+            """, (state, operation, error_message, datetime.now()))
+            
+            conn.commit()
+            
+    except Exception as e:
+        print(f"Error updating system state: {e}")
+
+def get_system_state():
+    """Get the current system state."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT current_state, last_operation, last_error_message, last_updated
+                FROM system_state WHERE id = 1
+            """)
+            
+            result = cursor.fetchone()
+            if result:
+                return {
+                    'state': result[0],
+                    'last_operation': result[1],
+                    'last_error_message': result[2],
+                    'last_updated': result[3]
+                }
+            else:
+                return {'state': 'idle', 'last_operation': 'unknown', 'last_error_message': None, 'last_updated': None}
+                
+    except Exception as e:
+        print(f"Error getting system state: {e}")
+        return {'state': 'error', 'last_operation': 'database_error', 'last_error_message': str(e), 'last_updated': None}
+
+def get_sem_positions():
+    """Get all SEM position statuses."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT position_name, position_type, status, last_updated
+                FROM sem_positions
+                ORDER BY position_name
+            """)
+            
+            positions = {}
+            for row in cursor.fetchall():
+                positions[row[0]] = {
+                    'type': row[1],
+                    'status': row[2],
+                    'last_updated': row[3]
+                }
+            
+            return positions
+            
+    except Exception as e:
+        print(f"Error getting SEM positions: {e}")
+        return {}
+
+def get_tem_positions():
+    """Get all TEM position statuses."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT position_name, status, last_updated
+                FROM tem_positions
+                ORDER BY position_name
+            """)
+            
+            positions = {}
+            for row in cursor.fetchall():
+                positions[row[0]] = {
+                    'status': row[1],
+                    'last_updated': row[2]
+                }
+            
+            return positions
+            
+    except Exception as e:
+        print(f"Error getting TEM positions: {e}")
+        return {}
+
+def clear_sem_positions():
+    """Reset all SEM positions to empty."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                UPDATE sem_positions 
+                SET status = 'empty', last_updated = ?
+            """, (datetime.now(),))
+            
+            conn.commit()
+            return True
+            
+    except Exception as e:
+        print(f"Error clearing SEM positions: {e}")
+        return False
+
+def clear_tem_positions():
+    """Reset all TEM positions to empty."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                UPDATE tem_positions 
+                SET status = 'empty', last_updated = ?
+            """, (datetime.now(),))
+            
+            conn.commit()
+            return True
+            
+    except Exception as e:
+        print(f"Error clearing TEM positions: {e}")
+        return False
+
+def update_position_status(position_name, status, position_type='tem'):
+    """Update the status of a specific position."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            if position_type == 'sem':
+                cursor.execute("""
+                    UPDATE sem_positions 
+                    SET status = ?, last_updated = ?
+                    WHERE position_name = ?
+                """, (status, datetime.now(), position_name))
+            else:  # tem
+                cursor.execute("""
+                    UPDATE tem_positions 
+                    SET status = ?, last_updated = ?
+                    WHERE position_name = ?
+                """, (status, datetime.now(), position_name))
+            
+            conn.commit()
+            return True
+            
+    except Exception as e:
+        print(f"Error updating position {position_name}: {e}")
+        return False
+
 #region Soak test functions
 
 def init_soak_test_database():
