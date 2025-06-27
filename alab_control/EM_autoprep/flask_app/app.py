@@ -1548,7 +1548,7 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination, 
     
     # Ensure we return the actual result
     return result
-
+''' Backup of the previous TEM process action before position tracking
 def tem_process_action(voltage, c_height, distance, etime, origin, destination, skip_laser=False, process_run_id=None, motor1_enabled=False, motor2_enabled=False):
     def _tem_operation(robot, voltage, c_height, distance, etime, origin, destination, skip_laser, motor1_enabled, motor2_enabled, process_run_id):
         # Initialize success flag
@@ -1865,6 +1865,403 @@ def tem_process_action(voltage, c_height, distance, etime, origin, destination, 
     
     # Ensure we return the actual result
     return result
+'''
+
+def tem_process_action(voltage, c_height, distance, etime, origin, destination, skip_laser=False, process_run_id=None, motor1_enabled=False, motor2_enabled=False):
+    """
+    Enhanced TEM process action with position tracking integration.
+    
+    Args:
+        voltage: Exposure voltage
+        c_height: Container height  
+        distance: Vertical shift
+        etime: Exposure time
+        origin: Origin position (e.g., 'TC1')
+        destination: Destination position (e.g., 'TE1')
+        skip_laser: Skip laser verification
+        process_run_id: Optional process run ID for database logging
+        motor1_enabled: Enable vibration motor 1
+        motor2_enabled: Enable vibration motor 2
+    
+    Returns:
+        Success or error message
+    """
+
+    # Format voltage and time to 5 characters with leading zeros
+    voltage_formatted = f"{int(voltage):05d}"
+    etime_formatted = f"{int(etime):05d}"
+
+    broadcast(f"TEM process requested with parameters: voltage={voltage}, c_height={c_height}, distance={distance}, time={etime}, origin={origin}, destination={destination}, skip_laser={skip_laser}, vibMotor1={motor1_enabled}, vibMotor2={motor2_enabled}")
+    
+    def get_position_status(position_type, position_name):
+        """Get the current status of a specific position."""
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                
+                if position_type == 'tem':
+                    cursor.execute("""
+                        SELECT status FROM tem_positions 
+                        WHERE position_name = ?
+                    """, (position_name,))
+                    
+                    result = cursor.fetchone()
+                    return result[0] if result else 'unknown'
+                    
+        except Exception as e:
+            print(f"Error getting position status: {e}")
+            return 'unknown'
+    
+    def update_position_status(position_type, position_name, new_status):
+        """Update the status of a specific position."""
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                
+                if position_type == 'tem':
+                    cursor.execute("""
+                        UPDATE tem_positions 
+                        SET status = ?, last_updated = CURRENT_TIMESTAMP
+                        WHERE position_name = ?
+                    """, (new_status, position_name))
+                    
+                    conn.commit()
+                    print(f"Updated TEM position {position_name} to status: {new_status}")
+                    return True
+                    
+        except Exception as e:
+            print(f"Error updating position status: {e}")
+            return False
+    
+    # POSITION VALIDATION - Check both origin and destination before starting
+    try:
+        # Check origin position availability
+        origin_status = get_position_status('tem', origin)
+        if origin_status != 'clean': 
+            error_msg = f"ERROR: Origin position {origin} does not contain a clean disk (current status: {origin_status}). Please verify sample tracking on your end."
+            broadcast(error_msg)
+            socketio.emit('function_response', {'result': error_msg})
+            
+            # Log validation error
+            if process_run_id:
+                log_error(process_run_id, error_msg, "user")
+            else:
+                log_standalone_error(error_msg, "user")
+            
+            return error_msg
+        
+        # Check destination position availability
+        destination_status = get_position_status('tem', destination)
+        if destination_status != 'empty':
+            error_msg = f"ERROR: Destination position {destination} is not available (current status: {destination_status}). Please verify sample tracking on your end."
+            broadcast(error_msg)
+            socketio.emit('function_response', {'result': error_msg})
+            
+            # Log validation error
+            if process_run_id:
+                log_error(process_run_id, error_msg, "user")
+            else:
+                log_standalone_error(error_msg, "user")
+            
+            return error_msg
+        
+        # Log successful validation
+        broadcast(f"Position validation passed: {origin} (clean) -> {destination} (empty)")
+        
+    except Exception as e:
+        error_msg = f"ERROR: Position validation failed: {str(e)}"
+        broadcast(error_msg)
+        
+        # Log validation error
+        if process_run_id:
+            log_error(process_run_id, error_msg, "system")
+        else:
+            log_standalone_error(error_msg, "system")
+        
+        return error_msg
+
+    def _tem_operation(robot, voltage, c_height, distance, etime, origin, destination, skip_laser, motor1_enabled, motor2_enabled, process_run_id):
+        # Initialize success flag
+        process_successful = False
+        
+        try:
+
+            # Step 1: Home robot
+            try:
+                robot.gohome()
+            except Exception as var_error:
+                error_msg = f"An error occurred when trying to home robot: {var_error}"
+                broadcast(error_msg)
+                # Log specific error
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "robot")
+                return False
+
+            # Step 2: Navigate to intermediate position
+            try:
+                robot.speed = SPEED_NORMAL
+                robot.moveto(*robot.intermediate_pos["ZHOME"])
+                broadcast(f"Collecting grid from {origin}.")
+            except Exception as e:
+                error_msg = f"Error moving to intermediate position: {e}"
+                broadcast(error_msg)
+                # Log specific error
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "robot")
+                return False
+
+            # Step 3: Grid collection with improved error handling
+            grid_pick_trials = 0
+            grid_picked = False
+
+            if skip_laser:
+                # Skip laser verification path
+                try:
+                    broadcast("Skipping laser verification - assuming grid was picked successfully")
+                    
+                    robot.moveto(x=robot.clean_disk_pos[origin][0])
+                    control_panel_tem_grid_holder_open()
+                    time.sleep(1.5)
+                    control_panel_vacuum("TEM", True)
+                    robot.moveto(*robot.clean_disk_pos[origin])
+                    robot.moveto(*robot.clean_disk_pos["TCTRAY_Z1"])
+                    robot.speed = SPEED_LOW
+                    robot.moveto(*robot.clean_disk_pos["TCTRAY_Z2"])
+                    robot.speed = SPEED_VLOW
+                    robot.moveto(*robot.clean_disk_pos["TCTRAY_Z3"])
+                    robot.moveto(*robot.clean_disk_pos["TCTRAY_Z2"])
+                    robot.speed = SPEED_NORMAL
+                    robot.moveto(*robot.intermediate_pos["ZHOME"])
+                    time.sleep(1)
+                    control_panel_tem_grid_holder_close()
+                    time.sleep(1)
+                    grid_picked = True
+                    
+                except Exception as e:
+                    error_msg = f"Error during grid collection (skip laser): {e}"
+                    broadcast(error_msg)
+                    # Log specific error
+                    if process_run_id:
+                        log_error(process_run_id, error_msg, "robot")
+                    return False
+            else:
+                # Normal path with laser verification
+                while grid_pick_trials < 3 and not grid_picked:
+                    grid_pick_trials += 1
+                    try:
+                        broadcast(f"Attempting to pick grid from {origin} (attempt {grid_pick_trials})")
+                        
+                        robot.moveto(x=robot.clean_disk_pos[origin][0])
+                        control_panel_tem_grid_holder_open()
+                        time.sleep(1.5)
+                        control_panel_vacuum("TEM", True)
+                        robot.moveto(*robot.clean_disk_pos[origin])
+                        robot.moveto(*robot.clean_disk_pos["TCTRAY_Z1"])
+                        robot.speed = SPEED_LOW
+                        robot.moveto(*robot.clean_disk_pos["TCTRAY_Z2"])
+                        robot.speed = SPEED_VLOW
+                        robot.moveto(*robot.clean_disk_pos["TCTRAY_Z3"])
+                        robot.moveto(*robot.clean_disk_pos["TCTRAY_Z2"])
+                        robot.speed = SPEED_NORMAL
+                        robot.moveto(*robot.intermediate_pos["ZHOME"])
+                        time.sleep(1)
+                        control_panel_tem_grid_holder_close()
+                        time.sleep(1)
+
+                        # Check laser detection
+                        print(f"Checking laser detection for {origin}")
+                        robot.moveto(*robot.equipment_pos["LASER_TEM"])
+                        robot.moveto(*robot.equipment_pos["LASER_TEM_Z1"])
+                        
+                        laser_result = control_panel_laser_status()
+                        if laser_result == "LASER1":
+                            grid_picked = True
+                            broadcast(f"Grid successfully picked from {origin}")
+                        else:
+                            broadcast(f"Grid not detected at {origin} - Expected LASER1, got {laser_result}. Attempt {grid_pick_trials} of 3.")
+                            # Turn off vacuum and try again
+                            control_panel_vacuum("TEM", False)
+                            
+                        robot.moveto(*robot.intermediate_pos["ZHOME"])
+                        
+                    except Exception as e:
+                        error_msg = f"Error during grid collection attempt {grid_pick_trials}: {e}"
+                        broadcast(error_msg)
+                        # Log specific error
+                        if process_run_id:
+                            log_error(process_run_id, error_msg, "robot")
+                        # Turn off vacuum before retrying
+                        try:
+                            control_panel_vacuum("TEM", False)
+                        except:
+                            pass
+
+                if not grid_picked:
+                    error_msg = f"Failed to pick grid from {origin} after 3 attempts"
+                    broadcast(error_msg)
+                    # Log specific error
+                    if process_run_id:
+                        log_error(process_run_id, error_msg, "process")
+                    return False
+
+            # Step 4: Move to exposure position and perform exposure
+            
+            if grid_picked:
+
+                try:
+                    # Move to charger and position for exposure
+                    robot.moveto(*robot.equipment_pos["CHARGER_TEM"])
+                    robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height))
+                    broadcast(f"Setting at: {MEASURED_BASE_HEIGHT - int(c_height)} mm.")
+                    robot.moveto(z=MEASURED_BASE_HEIGHT - int(c_height) + int(distance))
+                    broadcast(f"Exposing at: {MEASURED_BASE_HEIGHT - int(c_height) + int(distance)} mm.")
+
+                except Exception as e:
+                    error_msg = f"Error trying to bring grid to TEM charger position: {e}"
+                    broadcast(error_msg)
+                    # Log specific error
+                    if process_run_id:
+                        log_error(process_run_id, error_msg, "robot")
+                    return False
+                
+            # Step 5: Turn on vibration motors if requested
+
+                try:
+                    if motor1_enabled and motor2_enabled:
+                        control_panel_vibration_motor_both_on()
+                    elif motor1_enabled:
+                        control_panel_vibration_motor_1_on()
+                    elif motor2_enabled:
+                        control_panel_vibration_motor_2_on()
+                except Exception as e:
+                    error_msg = f"Error controlling vibration motors: {e}"
+                    broadcast(error_msg)
+                    # Log specific error
+                    if process_run_id:
+                        log_error(process_run_id, error_msg, "plc")
+
+            # Step 6: Exposing to HV
+            try:
+                broadcast(f"Exposing grid with voltage={voltage}, time={etime}")
+                control_panel_hvps_setting(voltage_formatted, etime_formatted)
+                time.sleep(int(etime)/1000+2)
+                # Turn off vibration motors
+                if motor1_enabled or motor2_enabled:
+                    control_panel_vibration_motor_all_off()
+            except Exception as e:
+                error_msg = f"Error during exposure: {e}"
+                broadcast(error_msg)
+                # Log specific error
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "process")
+                return False
+
+            # Step 7: Move to destination and place grid
+            try:
+                broadcast(f"Placing grid at {destination}")
+                robot.moveto(*robot.intermediate_pos["ZHOME"])
+                robot.moveto(x=robot.used_disk_pos[destination][0])
+                control_panel_tem_grid_holder_open()
+                time.sleep(1)
+                robot.moveto(y=robot.used_disk_pos[destination][1])
+                robot.moveto(*robot.used_disk_pos["TETRAY_Z1"])
+                robot.speed = SPEED_LOW
+                robot.moveto(*robot.used_disk_pos["TETRAY_Z2"])
+                robot.speed = SPEED_VLOW
+                robot.moveto(*robot.used_disk_pos["TETRAY_Z3"])
+                
+                # Turn off vacuum to release grid
+                control_panel_vacuum("TEM", False)
+                time.sleep(PAUSE_VAC)
+                
+                robot.moveto(*robot.used_disk_pos["TETRAY_Z2"])
+                robot.speed = SPEED_NORMAL
+                robot.moveto(*robot.intermediate_pos["ZHOME"])
+                time.sleep(1)
+                control_panel_tem_grid_holder_close()
+                time.sleep(1)
+                
+            except Exception as e:
+                error_msg = f"Error placing grid at destination: {e}"
+                broadcast(error_msg)
+                # Log specific error
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "robot")
+                return False
+
+            # Step 7: Return to home and cleanup
+            try:
+                robot.moveto(x=robot.intermediate_pos["HOME"][0])
+                robot.moveto(y=robot.intermediate_pos["HOME"][1])
+                control_panel_standby()
+                broadcast("TEM process completed successfully")
+                return True
+                
+            except Exception as e:
+                error_msg = f"Error in final cleanup: {e}"
+                broadcast(error_msg)
+                # Log specific error
+                if process_run_id:
+                    log_error(process_run_id, error_msg, "robot")
+                return False
+
+        except Exception as e:
+            error_msg = f"Unexpected error in TEM process: {e}"
+            broadcast(error_msg)
+            # Log unexpected error
+            if process_run_id:
+                log_error(process_run_id, error_msg, "system")
+            # Ensure motors are turned off in case of error
+            try:
+                if motor1_enabled or motor2_enabled:
+                    control_panel_vibration_motor_all_off()
+            except:
+                pass
+            return False
+
+    # Modified wrapper call to pass process_run_id through
+    def _wrapper_with_logging():
+        return handle_robot_operation(
+            lambda robot: _tem_operation(
+                robot, voltage, c_height, distance, etime, 
+                origin, destination, skip_laser, motor1_enabled, motor2_enabled, process_run_id
+            ),
+            robot=global_robot
+        )
+    
+    # Call the operation with proper error handling
+    result = handle_control_panel_operation(_wrapper_with_logging)
+    
+    # POSITION TRACKING UPDATE - Only update positions on successful completion
+    if result is True:
+        try:
+            # Update origin position to empty (disk was taken)
+            update_position_status('tem', origin, 'empty')
+            
+            # Update destination position to occupied (disk was placed)
+            update_position_status('tem', destination, 'occupied')
+            
+            print(f"Position tracking updated successfully: {origin} -> empty, {destination} -> occupied")
+            broadcast(f"Position tracking updated successfully: {origin} -> empty, {destination} -> occupied")
+                
+        except Exception as e:
+            error_msg = f"Warning: Process completed but position tracking update failed: {str(e)}"
+            broadcast(error_msg)
+            
+            # Log the tracking error but don't fail the process
+            if process_run_id:
+                log_error(process_run_id, error_msg, "system")
+            else:
+                log_standalone_error(error_msg, "system")
+    
+    # Additional logging for wrapper failures (PLC/robot connection issues)
+    if result is False and process_run_id:
+        # This catches cases where handle_control_panel_operation or handle_robot_operation fail
+        log_error(process_run_id, "Process failed due to control panel or robot connection issues", "system")
+    
+    # Ensure we return the actual result
+    return result
+
 
 def tem_manual_prepare():
     """
