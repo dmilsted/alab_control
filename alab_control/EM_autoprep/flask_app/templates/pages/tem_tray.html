@@ -36,7 +36,7 @@
 
             <div class="form-group">
                 <label for="origin">Origin:</label>
-                <select id="origin" name="origin" onchange="updateTEMDestinationAndHighlight(this.value)">
+                <select id="origin" name="origin">
                     <option value="TC1">TC1</option>
                     <option value="TC2">TC2</option>
                     <option value="TC3">TC3</option>
@@ -52,7 +52,7 @@
 
             <div class="form-group">
                 <label for="destination">Destination:</label>
-                <select id="destination" name="destination" onchange="updateTEMDestinationAndHighlight(this.value)">
+                <select id="destination" name="destination">
                     <option value="TE1">TE1</option>
                     <option value="TE2">TE2</option>
                     <option value="TE3">TE3</option>
@@ -234,7 +234,7 @@
             </text>
 
             <!-- Row 9 (TC1 to TC10) -->
-            <rect id="TC1" x="30" y="390" width="35" height="35" fill="lightgreen" stroke="black" />
+            <rect id="TC1" x="30" y="390" width="35" height="35" fill="white" stroke="black" />
             <text x="47.5" y="412.5">TC1</text>
             <rect id="TC2" x="75" y="390" width="35" height="35" fill="white" stroke="black" />
             <text x="92.5" y="412.5">TC2</text>
@@ -256,7 +256,7 @@
             <text x="452.5" y="412.5">TC10</text>
 
             <!-- Row 10 (TE1 to TE10) -->
-            <rect id="TE1" x="30" y="435" width="35" height="35" fill="lightblue" stroke="black" />
+            <rect id="TE1" x="30" y="435" width="35" height="35" fill="white" stroke="black" />
             <text x="47.5" y="457.5">TE1</text>
             <rect id="TE2" x="75" y="435" width="35" height="35" fill="white" stroke="black" />
             <text x="92.5" y="457.5">TE2</text>
@@ -278,6 +278,30 @@
             <text x="452.5" y="457.5">TE10</text>
 
         </svg>
+        <div class="position-legend">
+            <h4>Position Status:</h4>
+            <div class="legend-items">
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #90EE90;"></div>
+                    <span>Clean disk (TC)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #E8E8E8;"></div>
+                    <span>Empty slot (TE)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #FFB6C1;"></div>
+                    <span>Occupied slot (prepared)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #FFD700;"></div>
+                    <span>Selected disk (origin)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #87CEEB;"></div>
+                    <span>Selected disk (destination)</span>
+                </div>
+        </div>
 
     </div>
 </div>

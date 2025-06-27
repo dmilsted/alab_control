@@ -305,3 +305,59 @@ input[type="text"]:focus {
         align-items: center; /* Center items horizontally */
     }
 }
+
+/* legend for SVG files colors */
+
+.position-legend {
+    margin: 15px auto 0 auto;
+    padding: 12px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    background-color: #f9f9f9;
+    max-width: 200px;
+    font-size: 14px;
+}
+
+.position-legend h4 {
+    margin: 0 0 10px 0;
+    font-size: 16px;
+    color: #333;
+}
+
+.legend-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 200px;
+}
+
+.legend-color {
+    width: 16px;
+    height: 16px;
+    border: 1px solid #333;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+
+.legend-item span {
+    font-size: 13px;
+    color: #555;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .legend-items {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .legend-item {
+        min-width: auto;
+    }
+}

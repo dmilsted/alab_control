@@ -36,7 +36,7 @@
 
             <div class="form-group">
                 <label for="origin">Origin (SEM Tray):</label>
-                <select id="origin" name="origin" onchange="updateSEMStageOriginAndHighlight(this.value)">
+                <select id="origin" name="origin">
                     <option value="A1">A1</option>
                     <option value="A2">A2</option>
                     <option value="A3">A3</option>
@@ -57,7 +57,7 @@
 
             <div class="form-group">
                 <label for="destination">Destination (Stage):</label>
-                <select id="destination" name="destination" onchange="updateSEMStageDestinationAndHighlight(this.value)">
+                <select id="destination" name="destination">
                     <option value="PH_STUB_O">o</option>
                     <option value="PH_STUB_P">p</option>
                     <option value="PH_STUB_Q">q</option>
@@ -90,7 +90,7 @@
     
     <div class="form-card" style="margin-left: 20px; text-align: center;"">
         <h2 class="main-subtitle">Origin: SEM Tray</h2>
-        <svg id="semTrayContainer" width="300" height="380" viewBox="0 0 250 470" xmlns="http://www.w3.org/2000/svg">
+        <svg id="semTrayContainer" width="300" height="300" viewBox="0 0 300 400" xmlns="http://www.w3.org/2000/svg">
             <rect width="290" height="370" x="5" y="5" fill="none" stroke="black" stroke-width="2" rx="15" ry="15" />
             <rect width="20" height="20" x="140" y="5" fill="black" />
 
@@ -140,6 +140,29 @@
         </svg>
         </svg>
     <!-- </div> -->
+
+    <div class="position-legend">
+    <h4>Position Status:</h4>
+        <div class="legend-items">
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #90EE90;"></div>
+                <span>Clean stub (available)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #FFB6C1;"></div>
+                <span>Occupied slot (prepared)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #E8E8E8;"></div>
+                <span>Empty slot (available)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #FFD700;"></div>
+                <span>Selected slot</span>
+            </div>
+        </div>
+    </div>
+    <br/><br/>
     
     <!-- <div class="form-card" style="margin-top: 20px; margin-left: 20px;"> -->
         <h2 class="main-subtitle">Destination: Stage</h2>

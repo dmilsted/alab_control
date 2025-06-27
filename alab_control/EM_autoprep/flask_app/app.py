@@ -1231,9 +1231,8 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination, 
     try:
         # Check origin position availability
         origin_status = get_position_status('sem', origin)
-        if origin_status != 'clean_stub':
+        if origin_status != 'clean': 
             error_msg = f"ERROR: Origin position {origin} does not contain a clean stub (current status: {origin_status}). Please verify sample tracking on your end."
-            broadcast(error_msg)
             
             # Log the validation error
             if process_run_id:
@@ -1524,14 +1523,14 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination, 
             
             # Update destination position based on where stub was delivered
             if destination == "tray":
-                # Stub returned to same tray position as used
-                update_position_status('sem', origin, 'used_stub')
+                # Stub returned to same tray position as occupied
+                update_position_status('sem', origin, 'occupied')
             else:
                 # Stub delivered to stage position
-                update_position_status('sem', destination, 'used_stub')
+                update_position_status('sem', destination, 'occupied')
             
-            print(f"Position tracking updated successfully: {origin} -> empty, {destination if destination != 'tray' else origin} -> used_stub")
-            
+            print(f"Position tracking updated successfully: {origin} -> empty, {destination if destination != 'tray' else origin} -> occupied")
+                
         except Exception as e:
             error_msg = f"Warning: Process completed but position tracking update failed: {str(e)}"
             broadcast(error_msg)
@@ -2495,6 +2494,38 @@ def clear_tem_memory():
             return "SUCCESS: TEM position memory cleared"
         else:
             return "ERROR: Failed to clear TEM position memory"
+    except Exception as e:
+        return f"ERROR: {str(e)}"
+
+#function created to update the color on the SVG file
+def get_sem_position_status():
+    """Get SEM position statuses formatted for frontend display."""
+    try:
+        positions = get_sem_positions()  # This function already exists in database.py
+        
+        if positions:
+            # Return as JSON string for the frontend
+            import json
+            return json.dumps(positions)
+        else:
+            return "ERROR: Could not retrieve SEM position data"
+            
+    except Exception as e:
+        return f"ERROR: {str(e)}"
+
+#function created to update the color on the SVG file
+def get_tem_position_status():
+    """Get TEM position statuses formatted for frontend display."""
+    try:
+        positions = get_tem_positions()  # This function already exists in database.py
+        
+        if positions:
+            # Return as JSON string for the frontend
+            import json
+            return json.dumps(positions)
+        else:
+            return "ERROR: Could not retrieve TEM position data"
+            
     except Exception as e:
         return f"ERROR: {str(e)}"
 

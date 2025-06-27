@@ -36,7 +36,8 @@
 
             <div class="form-group">
                 <label for="origin">Origin and Destination:</label>
-                <select id="origin" name="origin" onchange="updateSEMDestinationAndHighlight(this.value)">
+                <select name="origin" id="origin">
+                    <option value="">Select origin position</option>
                     <option value="A1">A1</option>
                     <option value="A2">A2</option>
                     <option value="A3">A3</option>
@@ -125,12 +126,33 @@
             <circle id="B3" cx="250" cy="265" r="25" fill="white" stroke="black" />
             <text x="250" y="265">B3</text>
 
-            <circle id="A1" cx="50" cy="330" r="25" fill="lightgreen" stroke="black" />
+            <circle id="A1" cx="50" cy="330" r="25" fill="white" stroke="black" />
             <text x="50" y="330">A1</text>
             <circle id="A2" cx="150" cy="330" r="25" fill="white" stroke="black" />
             <text x="150" y="330">A2</text>
             <circle id="A3" cx="250" cy="330" r="25" fill="white" stroke="black" />
             <text x="250" y="330">A3</text>
         </svg>
+        <div class="position-legend">
+            <h4>Position Status:</h4>
+            <div class="legend-items">
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #90EE90;"></div>
+                    <span>Clean stub (available)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #FFB6C1;"></div>
+                    <span>Occupied slot (prepared)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #E8E8E8;"></div>
+                    <span>Empty (No stub)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #FFD700;"></div>
+                    <span>Selected stub</span>
+                </div>
+            </div>
+        </div>
     </div>
 </div>

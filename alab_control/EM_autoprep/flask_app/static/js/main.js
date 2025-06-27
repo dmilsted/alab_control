@@ -176,6 +176,10 @@ document.addEventListener('DOMContentLoaded', function() {
         if (typeof window.initializePLCControls === 'function') {
             window.initializePLCControls();
         }
+        if (typeof window.initializePositionSystem === 'function') {
+        console.log('Calling position system initialization...');
+        window.initializePositionSystem();
+        }
     }
 
     // Functions to manually control the 3DP 
@@ -217,3 +221,46 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load home page by default
     loadPage('home');
 });
+
+// new color position system
+
+function initializePageHandlers() {
+    // Existing code for data-function handlers
+    document.querySelectorAll('[data-function]').forEach(element => {
+        element.addEventListener('click', function(e) {
+            e.preventDefault();
+            let functionData = {
+                function: this.dataset.function
+            };
+
+            // Special handling for PLC command
+            if (this.dataset.function === 'send_manual_plc_command') {
+                const commandInput = document.getElementById('plc-command-input');
+                if (commandInput) {
+                    functionData.command = commandInput.value;
+                }
+            }
+
+            // Call the function
+            window.callFunction(functionData);
+        });
+    });
+
+    // Initialize PLC controls if present
+    if (typeof window.initializePLCControls === 'function') {
+        window.initializePLCControls();
+    }
+
+    // Initialize position system - NEW CODE
+    if (typeof window.initializePositionSystem === 'function') {
+        window.initializePositionSystem();
+    }
+
+    // Setup form handlers
+    document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            window.submitForm(this);
+        });
+    });
+}

@@ -714,7 +714,7 @@ def create_position_tracking_tables():
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     position_name TEXT NOT NULL UNIQUE,
                     position_type TEXT NOT NULL, -- 'tray' or 'stage'
-                    status TEXT NOT NULL, -- 'empty', 'clean_stub', 'used_stub'
+                    status TEXT NOT NULL, -- 'empty', 'clean', 'occupied'
                     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -724,7 +724,7 @@ def create_position_tracking_tables():
                 CREATE TABLE IF NOT EXISTS tem_positions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     position_name TEXT NOT NULL UNIQUE,
-                    status TEXT NOT NULL, -- 'empty', 'clean_disk', 'used_disk'
+                    status TEXT NOT NULL, -- 'empty', 'clean', 'occupied'
                     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -868,24 +868,40 @@ def get_sem_positions():
             cursor = conn.cursor()
             
             cursor.execute("""
-                SELECT position_name, position_type, status, last_updated
+                SELECT position_name, status, last_updated
                 FROM sem_positions
                 ORDER BY position_name
             """)
             
-            positions = {}
-            for row in cursor.fetchall():
-                positions[row[0]] = {
-                    'type': row[1],
-                    'status': row[2],
-                    'last_updated': row[3]
-                }
+            rows = cursor.fetchall()
+            if not rows:
+                return "SEM|Last change:No data|"
             
-            return positions
+            # Get the most recent timestamp (they should all be the same anyway)
+            latest_timestamp = max(row[2] for row in rows if row[2])
+            
+            # Format timestamp to remove seconds and milliseconds
+            if isinstance(latest_timestamp, str):
+                # Parse the timestamp string and reformat
+                dt = datetime.fromisoformat(latest_timestamp.replace('Z', '+00:00'))
+            else:
+                dt = latest_timestamp
+            
+            formatted_time = dt.strftime("%Y-%m-%d_%H:%M")
+            
+            # Build the compact string
+            position_strings = []
+            for row in rows:
+                position_name = row[0]
+                status = row[1]
+                position_strings.append(f"{position_name}:{status}")
+            
+            result = f"SEM|Last change:{formatted_time}|" + "|".join(position_strings)
+            return result
             
     except Exception as e:
         print(f"Error getting SEM positions: {e}")
-        return {}
+        return f"SEM|Error:{str(e)}|"
 
 def get_tem_positions():
     """Get all TEM position statuses."""
@@ -899,18 +915,35 @@ def get_tem_positions():
                 ORDER BY position_name
             """)
             
-            positions = {}
-            for row in cursor.fetchall():
-                positions[row[0]] = {
-                    'status': row[1],
-                    'last_updated': row[2]
-                }
+            rows = cursor.fetchall()
+            if not rows:
+                return "TEM|Last change:No data|"
             
-            return positions
+            # Get the most recent timestamp (they should all be the same anyway)
+            latest_timestamp = max(row[2] for row in rows if row[2])
+            
+            # Format timestamp to remove seconds and milliseconds
+            if isinstance(latest_timestamp, str):
+                # Parse the timestamp string and reformat
+                dt = datetime.fromisoformat(latest_timestamp.replace('Z', '+00:00'))
+            else:
+                dt = latest_timestamp
+            
+            formatted_time = dt.strftime("%Y-%m-%d_%H:%M")
+            
+            # Build the compact string
+            position_strings = []
+            for row in rows:
+                position_name = row[0]
+                status = row[1]
+                position_strings.append(f"{position_name}:{status}")
+            
+            result = f"TEM|Last change:{formatted_time}|" + "|".join(position_strings)
+            return result
             
     except Exception as e:
         print(f"Error getting TEM positions: {e}")
-        return {}
+        return f"TEM|Error:{str(e)}|"
 
 def clear_sem_positions():
     """Reset SEM positions to fresh tray state - tray positions get clean stubs, stage positions become empty."""
@@ -918,22 +951,29 @@ def clear_sem_positions():
         with get_db_connection() as conn:
             cursor = conn.cursor()
             
-            # Set tray positions to 'clean_stub' (fresh tray installed)
-            cursor.execute("""
-                UPDATE sem_positions 
-                SET status = 'clean_stub', last_updated = ?
-                WHERE position_type = 'tray'
-            """, (datetime.now(),))
+            # Get position names using the same logic as initialize_sem_positions
+            from app import SamplePrepEnder3
             
-            # Set stage positions to 'empty' (stages start empty)
-            cursor.execute("""
-                UPDATE sem_positions 
-                SET status = 'empty', last_updated = ?
-                WHERE position_type = 'stage'
-            """, (datetime.now(),))
+            # Update tray positions to 'clean' (fresh tray installed)
+            if hasattr(SamplePrepEnder3, 'clean_stub_pos'):
+                for position_name in SamplePrepEnder3.clean_stub_pos.keys():
+                    cursor.execute("""
+                        UPDATE sem_positions 
+                        SET status = 'clean', last_updated = ?
+                        WHERE position_name = ? AND position_type = 'tray'
+                    """, (datetime.now(), position_name))
+            
+            # Update stage positions to 'empty' (stages start empty)  
+            if hasattr(SamplePrepEnder3, 'phenom_stub_pos'):
+                for position_name in SamplePrepEnder3.phenom_stub_pos.keys():
+                    cursor.execute("""
+                        UPDATE sem_positions 
+                        SET status = 'empty', last_updated = ?
+                        WHERE position_name = ? AND position_type = 'stage'
+                    """, (datetime.now(), position_name))
             
             conn.commit()
-            print("SEM positions reset: tray positions -> clean_stub, stage positions -> empty")
+            print("SEM positions reset: tray positions -> clean, stage positions -> empty")
             return True
             
     except Exception as e:
@@ -946,36 +986,29 @@ def clear_tem_positions():
         with get_db_connection() as conn:
             cursor = conn.cursor()
             
-            # Get position names from CSV files to determine which are clean vs used disk positions
+            # Get position names using the same logic as initialize_tem_positions
             from app import SamplePrepEnder3
             
-            clean_disk_positions = list(SamplePrepEnder3.clean_disk_pos.keys()) if hasattr(SamplePrepEnder3, 'clean_disk_pos') else []
-            used_disk_positions = list(SamplePrepEnder3.used_disk_pos.keys()) if hasattr(SamplePrepEnder3, 'used_disk_pos') else []
+            # Update clean disk positions to 'clean' (fresh clean disk tray installed)
+            if hasattr(SamplePrepEnder3, 'clean_disk_pos'):
+                for position_name in SamplePrepEnder3.clean_disk_pos.keys():
+                    cursor.execute("""
+                        UPDATE tem_positions 
+                        SET status = 'clean', last_updated = ?
+                        WHERE position_name = ?
+                    """, (datetime.now(), position_name))
             
-            # Remove Z-level position names (they're not actual holder positions)
-            clean_disk_positions = [pos for pos in clean_disk_positions if not pos.startswith('TCTRAY_Z')]
-            used_disk_positions = [pos for pos in used_disk_positions if not pos.startswith('TCTRAY_Z')]
-            
-            # Set clean disk positions to 'clean_disk' (fresh clean disk tray installed)
-            if clean_disk_positions:
-                placeholders = ','.join(['?' for _ in clean_disk_positions])
-                cursor.execute(f"""
-                    UPDATE tem_positions 
-                    SET status = 'clean_disk', last_updated = ?
-                    WHERE position_name IN ({placeholders})
-                """, [datetime.now()] + clean_disk_positions)
-            
-            # Set used disk positions to 'empty' (used disk storage starts empty)
-            if used_disk_positions:
-                placeholders = ','.join(['?' for _ in used_disk_positions])
-                cursor.execute(f"""
-                    UPDATE tem_positions 
-                    SET status = 'empty', last_updated = ?
-                    WHERE position_name IN ({placeholders})
-                """, [datetime.now()] + used_disk_positions)
+            # Update used disk positions to 'empty' (used disk storage starts empty)
+            if hasattr(SamplePrepEnder3, 'used_disk_pos'):
+                for position_name in SamplePrepEnder3.used_disk_pos.keys():
+                    cursor.execute("""
+                        UPDATE tem_positions 
+                        SET status = 'empty', last_updated = ?
+                        WHERE position_name = ?
+                    """, (datetime.now(), position_name))
             
             conn.commit()
-            print("TEM positions reset: clean disk positions -> clean_disk, used disk positions -> empty")
+            print("TEM positions reset: clean disk positions -> clean, used disk positions -> empty")
             return True
             
     except Exception as e:
