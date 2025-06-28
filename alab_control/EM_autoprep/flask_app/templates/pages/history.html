@@ -1,0 +1,23 @@
+<div class="form-card">
+    <h1 class="main-title">Experiment History</h1>
+</div>
+
+<div class="form-card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <div>
+            <label>
+                <input type="checkbox" id="successfulOnly" checked> 
+                Show successful experiments only
+            </label>
+        </div>
+        <div>
+            <button class="btn btn-primary" id="exportCsvBtn">Export CSV</button>
+            <button class="btn btn-primary" id="exportJsonBtn">Export JSON</button>
+            <button class="btn btn-secondary" id="refreshBtn">Refresh</button>
+        </div>
+    </div>
+    
+    <div id="historyContainer">
+        <p>Loading experiment history...</p>
+    </div>
+</div>

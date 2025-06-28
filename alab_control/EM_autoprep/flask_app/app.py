@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, make_response, render_template, request, jsonify
 from flask_socketio import SocketIO
 import socket
 import threading
@@ -11,6 +11,7 @@ import time
 from datetime import datetime, timedelta
 import json
 from database import (
+    get_detailed_process_history,
     init_database, 
     start_process_run, 
     end_process_run, 
@@ -4651,6 +4652,8 @@ def get_page(page):
         return render_template('pages/tem_tray.html')
     elif page == 'tem-manual':
         return render_template('pages/tem_manual.html')
+    elif page == 'history':
+        return render_template('pages/history.html')
     else:
         return f"Page not found: {page}", 404
 
@@ -4836,7 +4839,143 @@ def api_export_data():
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/experiment_history')
+def get_experiment_history():
+    """API endpoint to fetch experiment history."""
+    try:
+        show_successful_only = request.args.get('success_only', 'true').lower() == 'true'
+        
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            if show_successful_only:
+                query = """
+                    SELECT id, timestamp, process_type, success, error_category, 
+                           duration_seconds, parameters
+                    FROM process_runs 
+                    WHERE success = 1
+                    ORDER BY timestamp DESC 
+                    LIMIT 30
+                """
+            else:
+                query = """
+                    SELECT id, timestamp, process_type, success, error_category, 
+                           duration_seconds, parameters
+                    FROM process_runs 
+                    ORDER BY timestamp DESC 
+                    LIMIT 30
+                """
+            
+            cursor.execute(query)
+            results = cursor.fetchall()
+            
+            # Convert to list of dictionaries and parse JSON parameters
+            history = []
+            for row in results:
+                experiment = dict(row)
+                if experiment['parameters']:
+                    try:
+                        experiment['parameters'] = json.loads(experiment['parameters'])
+                    except:
+                        experiment['parameters'] = {}
+                history.append(experiment)
+            
+            return jsonify(history)
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/export_experiments')
+def export_experiments():
+    """Export experiments to CSV or JSON."""
+    format_type = request.args.get('format', 'csv').lower()
+    show_successful_only = request.args.get('success_only', 'true').lower() == 'true'
     
+    try:
+        # Get data using existing function but modify the query
+        if show_successful_only:
+            # You'll need to modify the get_detailed_process_history function or create a new one
+            # For now, let's create the query here
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, timestamp, process_type, success, error_category, 
+                           duration_seconds, parameters
+                    FROM process_runs 
+                    WHERE success = 1
+                    ORDER BY timestamp DESC
+                """)
+                results = [dict(row) for row in cursor.fetchall()]
+        else:
+            results = get_detailed_process_history(365)  # Get all data
+        
+        if format_type == 'json':
+            response = make_response(json.dumps(results, indent=2))
+            response.headers['Content-Type'] = 'application/json'
+            response.headers['Content-Disposition'] = 'attachment; filename=experiments.json'
+            return response
+        else:  # CSV
+            import csv
+            from io import StringIO
+            
+            output = StringIO()
+            if results:
+                # Flatten the parameters for CSV
+                flattened_results = []
+                for result in results:
+                    flat_result = {k: v for k, v in result.items() if k != 'parameters'}
+                    if result.get('parameters'):
+                        try:
+                            params = json.loads(result['parameters']) if isinstance(result['parameters'], str) else result['parameters']
+                            for param_key, param_value in params.items():
+                                flat_result[f'param_{param_key}'] = param_value
+                        except:
+                            pass
+                    flattened_results.append(flat_result)
+                
+                fieldnames = flattened_results[0].keys() if flattened_results else []
+                writer = csv.DictWriter(output, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(flattened_results)
+            
+            response = make_response(output.getvalue())
+            response.headers['Content-Type'] = 'text/csv'
+            response.headers['Content-Disposition'] = 'attachment; filename=experiments.csv'
+            return response
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/experiment_details/<int:experiment_id>')
+def get_experiment_details(experiment_id):
+    """Get detailed information about a specific experiment."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT id, timestamp, process_type, success, error_category, 
+                       duration_seconds, parameters
+                FROM process_runs 
+                WHERE id = ?
+            """, (experiment_id,))
+            
+            result = cursor.fetchone()
+            if result:
+                experiment = dict(result)
+                if experiment['parameters']:
+                    try:
+                        experiment['parameters'] = json.loads(experiment['parameters'])
+                    except:
+                        experiment['parameters'] = {}
+                return jsonify(experiment)
+            else:
+                return jsonify({'error': 'Experiment not found'}), 404
+                
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 #endregion
 
 #region - routes related to soak tests
@@ -6051,7 +6190,9 @@ def extract_parameters_for_logging(function_type, data):
             'time': data.get('time'),
             'origin': data.get('origin'),
             'destination': data.get('destination'),
-            'skip_laser': data.get('skip_laser', False) if function_type == 'tem_process' else None
+            'skip_laser': data.get('skip_laser', False) if function_type == 'tem_process' else None,
+            'project_name': data.get('project_name'),  # New field
+            'composition': data.get('composition')     # New field
         }
     elif function_type == 'robot_manual_move':
         return {
