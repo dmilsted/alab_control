@@ -139,17 +139,27 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Load page content
     function loadPage(page) {
-        fetch(`/get_page/${page}`)
-            .then(response => response.text())
-            .then(html => {
-                pageContent.innerHTML = html;
-                initializePageHandlers();
-            })
-            .catch(error => {
-                console.error('Error loading page:', error);
-                window.addToTerminal(`Error loading page: ${error}`);
-            });
-    }
+    fetch(`/get_page/${page}`)
+        .then(response => response.text())
+        .then(html => {
+            pageContent.innerHTML = html;
+            window.location.hash = page; // Set hash for history.js
+            initializePageHandlers();
+            
+            // Special handling for history page
+            if (page === 'history') {
+                setTimeout(() => {
+                    if (window.experimentHistory) {
+                        window.experimentHistory.init();
+                    }
+                }, 100);
+            }
+        })
+        .catch(error => {
+            console.error('Error loading page:', error);
+            window.addToTerminal(`Error loading page: ${error}`);
+        });
+}
 
     // Initialize page handlers
     function initializePageHandlers() {

@@ -4879,11 +4879,15 @@ def get_experiment_history():
                         experiment['parameters'] = json.loads(experiment['parameters'])
                     except:
                         experiment['parameters'] = {}
+                else:
+                    experiment['parameters'] = {}
                 history.append(experiment)
             
+            print(f"Found {len(history)} experiments")  # Debug log
             return jsonify(history)
             
     except Exception as e:
+        print(f"Error in experiment history API: {e}")  # Debug log
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/export_experiments')
@@ -4893,25 +4897,30 @@ def export_experiments():
     show_successful_only = request.args.get('success_only', 'true').lower() == 'true'
     
     try:
-        # Get data using existing function but modify the query
-        if show_successful_only:
-            # You'll need to modify the get_detailed_process_history function or create a new one
-            # For now, let's create the query here
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            if show_successful_only:
+                query = """
                     SELECT id, timestamp, process_type, success, error_category, 
                            duration_seconds, parameters
                     FROM process_runs 
                     WHERE success = 1
                     ORDER BY timestamp DESC
-                """)
-                results = [dict(row) for row in cursor.fetchall()]
-        else:
-            results = get_detailed_process_history(365)  # Get all data
+                """
+            else:
+                query = """
+                    SELECT id, timestamp, process_type, success, error_category, 
+                           duration_seconds, parameters
+                    FROM process_runs 
+                    ORDER BY timestamp DESC
+                """
+            
+            cursor.execute(query)
+            results = [dict(row) for row in cursor.fetchall()]
         
         if format_type == 'json':
-            response = make_response(json.dumps(results, indent=2))
+            response = make_response(json.dumps(results, indent=2, default=str))
             response.headers['Content-Type'] = 'application/json'
             response.headers['Content-Disposition'] = 'attachment; filename=experiments.json'
             return response
@@ -4921,23 +4930,49 @@ def export_experiments():
             
             output = StringIO()
             if results:
-                # Flatten the parameters for CSV
+                # First pass: collect all possible field names
+                all_fieldnames = set()
                 flattened_results = []
+                
                 for result in results:
                     flat_result = {k: v for k, v in result.items() if k != 'parameters'}
+                    
+                    # Add parameter fields with param_ prefix
                     if result.get('parameters'):
                         try:
                             params = json.loads(result['parameters']) if isinstance(result['parameters'], str) else result['parameters']
-                            for param_key, param_value in params.items():
-                                flat_result[f'param_{param_key}'] = param_value
+                            if params:
+                                for param_key, param_value in params.items():
+                                    param_field = f'param_{param_key}'
+                                    flat_result[param_field] = param_value
+                                    all_fieldnames.add(param_field)
                         except:
                             pass
+                    
+                    # Add base field names
+                    for key in flat_result.keys():
+                        if not key.startswith('param_'):
+                            all_fieldnames.add(key)
+                    
                     flattened_results.append(flat_result)
                 
-                fieldnames = flattened_results[0].keys() if flattened_results else []
-                writer = csv.DictWriter(output, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(flattened_results)
+                # Create ordered fieldnames: base fields first, then parameter fields
+                base_fields = ['id', 'timestamp', 'process_type', 'success', 'error_category', 'duration_seconds']
+                param_fields = sorted([f for f in all_fieldnames if f.startswith('param_')])
+                other_fields = sorted([f for f in all_fieldnames if f not in base_fields and not f.startswith('param_')])
+                
+                fieldnames = base_fields + other_fields + param_fields
+                
+                # Second pass: ensure all records have all fields
+                for flat_result in flattened_results:
+                    for field in fieldnames:
+                        if field not in flat_result:
+                            flat_result[field] = ''  # Fill missing fields with empty string
+                
+                if flattened_results:
+                    writer = csv.DictWriter(output, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(flattened_results)
             
             response = make_response(output.getvalue())
             response.headers['Content-Type'] = 'text/csv'
@@ -4945,6 +4980,7 @@ def export_experiments():
             return response
             
     except Exception as e:
+        print(f"Error in export experiments API: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/experiment_details/<int:experiment_id>')

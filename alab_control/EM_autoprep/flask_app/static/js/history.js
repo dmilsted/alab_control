@@ -2,103 +2,17 @@
 
 class ExperimentHistory {
     constructor() {
-        this.init();
-        this.checkForRepeatExperiment();
+        // Don't initialize immediately, let the page load first
+        this.initialized = false;
     }
 
     init() {
-        document.addEventListener('DOMContentLoaded', () => {
-            console.log('History page DOM loaded');
-            if (document.getElementById('historyContainer')) {
-                console.log('History container found, binding events');
-                this.bindEventListeners();
-                this.loadHistory();
-            } else {
-                console.log('History container not found');
-            }
-            this.checkForRepeatExperiment();
-        });
-    }
-
-    checkForRepeatExperiment() {
-        // Check if we're on a procedural page and have stored parameters
-        const storedParams = localStorage.getItem('repeatExperimentParams');
-        if (storedParams) {
-            try {
-                const params = JSON.parse(storedParams);
-                
-                // Check if we're on the right page for these parameters
-                const currentHash = window.location.hash.replace('#', '');
-                let shouldPopulate = false;
-                
-                // Determine if current page matches the experiment type
-                if (currentHash === 'sem-tray' || currentHash === 'sem-stage' || currentHash === 'tem-tray') {
-                    shouldPopulate = true;
-                }
-                
-                if (shouldPopulate) {
-                    // Wait a bit for the page to fully load, then populate
-                    setTimeout(() => {
-                        this.populateFormFields(params);
-                        localStorage.removeItem('repeatExperimentParams');
-                        
-                        // Show a notification
-                        this.showNotification('Form populated with previous experiment parameters', 'success');
-                    }, 500);
-                }
-            } catch (error) {
-                console.error('Error parsing stored experiment parameters:', error);
-                localStorage.removeItem('repeatExperimentParams'); // Clear bad data
-            }
-        }
-    }
-
-    populateFormFields(params) {
-        console.log('Populating form with parameters:', params);
+        if (this.initialized) return;
+        this.initialized = true;
         
-        Object.entries(params).forEach(([key, value]) => {
-            const element = document.getElementById(key);
-            if (element) {
-                if (element.type === 'checkbox') {
-                    element.checked = value === 'true' || value === true;
-                } else if (element.tagName === 'SELECT') {
-                    element.value = value;
-                } else {
-                    element.value = value;
-                }
-                
-                // Trigger change events in case there are listeners
-                element.dispatchEvent(new Event('change'));
-            }
-        });
-    }
-
-    showNotification(message, type = 'info') {
-        // Create a notification element
-        const notification = document.createElement('div');
-        notification.style.cssText = `
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 15px 20px;
-            border-radius: 5px;
-            color: white;
-            font-weight: bold;
-            z-index: 10000;
-            max-width: 300px;
-            background-color: ${type === 'success' ? '#4CAF50' : type === 'error' ? '#f44336' : '#2196F3'};
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-        `;
-        notification.textContent = message;
-        
-        document.body.appendChild(notification);
-        
-        // Remove after 4 seconds
-        setTimeout(() => {
-            if (notification.parentNode) {
-                notification.parentNode.removeChild(notification);
-            }
-        }, 4000);
+        console.log('Initializing ExperimentHistory');
+        this.bindEventListeners();
+        this.loadHistory();
     }
 
     bindEventListeners() {
@@ -139,7 +53,7 @@ class ExperimentHistory {
         if (refreshBtn) {
             refreshBtn.addEventListener('click', () => {
                 console.log('Refresh clicked');
-                this.refreshHistory();
+                this.loadHistory();
             });
         }
     }
@@ -222,8 +136,7 @@ class ExperimentHistory {
                     <td style="border: 1px solid #ddd; padding: 12px;">${composition}</td>
                     <td style="border: 1px solid #ddd; padding: 12px;">${duration}</td>
                     <td style="border: 1px solid #ddd; padding: 12px;">
-                        <button class="btn btn-small" onclick="experimentHistory.showDetails(${exp.id})" style="margin-right: 5px;">Details</button>
-                        ${exp.success ? `<button class="btn btn-small" onclick="experimentHistory.repeatExperiment(${exp.id})">Repeat</button>` : ''}
+                        <button class="btn btn-small" onclick="window.experimentHistory.showDetails(${exp.id})">Details</button>
                     </td>
                 </tr>
             `;
@@ -247,139 +160,17 @@ class ExperimentHistory {
         window.open(url, '_blank');
     }
 
-    refreshHistory() {
-        console.log('Refreshing history');
-        this.loadHistory();
-    }
-
     showDetails(experimentId) {
-        console.log('Showing details for experiment:', experimentId);
-        // Fetch detailed information for this experiment
-        fetch(`/api/experiment_details/${experimentId}`)
-            .then(response => response.json())
-            .then(data => {
-                this.displayDetailsModal(data);
-            })
-            .catch(error => {
-                console.error('Error fetching experiment details:', error);
-                alert('Error loading experiment details. Please try again.');
-            });
-    }
-
-    displayDetailsModal(experiment) {
-        console.log('Displaying details modal for experiment:', experiment);
-        // Create a modal to show detailed information
-        const modal = document.createElement('div');
-        modal.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.5);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-        `;
-
-        const modalContent = document.createElement('div');
-        modalContent.style.cssText = `
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            max-width: 600px;
-            max-height: 80vh;
-            overflow-y: auto;
-            position: relative;
-        `;
-
-        let parametersHtml = '';
-        if (experiment.parameters) {
-            const params = typeof experiment.parameters === 'string' 
-                ? JSON.parse(experiment.parameters) 
-                : experiment.parameters;
-            
-            parametersHtml = Object.entries(params)
-                .map(([key, value]) => `<p><strong>${key}:</strong> ${value}</p>`)
-                .join('');
-        }
-
-        modalContent.innerHTML = `
-            <h2>Experiment Details</h2>
-            <button onclick="this.closest('.modal').remove()" style="position: absolute; top: 10px; right: 15px; background: none; border: none; font-size: 20px; cursor: pointer;">&times;</button>
-            <p><strong>ID:</strong> ${experiment.id}</p>
-            <p><strong>Timestamp:</strong> ${new Date(experiment.timestamp).toLocaleString()}</p>
-            <p><strong>Process Type:</strong> ${experiment.process_type}</p>
-            <p><strong>Success:</strong> ${experiment.success ? 'Yes' : 'No'}</p>
-            ${experiment.error_category ? `<p><strong>Error Category:</strong> ${experiment.error_category}</p>` : ''}
-            ${experiment.duration_seconds ? `<p><strong>Duration:</strong> ${experiment.duration_seconds.toFixed(2)} seconds</p>` : ''}
-            <h3>Parameters:</h3>
-            <div style="background: #f5f5f5; padding: 10px; border-radius: 4px;">
-                ${parametersHtml || '<p>No parameters recorded</p>'}
-            </div>
-        `;
-
-        modal.className = 'modal';
-        modal.appendChild(modalContent);
-        document.body.appendChild(modal);
-
-        // Close modal when clicking outside
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.remove();
-            }
-        });
-    }
-
-    repeatExperiment(experimentId) {
-        console.log('Repeating experiment:', experimentId);
-        // Fetch experiment data and populate forms
-        fetch(`/api/experiment_details/${experimentId}`)
-            .then(response => response.json())
-            .then(experiment => {
-                if (experiment.parameters) {
-                    const params = typeof experiment.parameters === 'string' 
-                        ? JSON.parse(experiment.parameters) 
-                        : experiment.parameters;
-                    
-                    // Determine which page to navigate to based on process type
-                    let targetPage = '';
-                    if (experiment.process_type === 'sem_process') {
-                        // Check if it's tray or stage based on destination
-                        targetPage = params.destination === 'tray' ? 'sem-tray' : 'sem-stage';
-                    } else if (experiment.process_type === 'tem_process') {
-                        targetPage = 'tem-tray';
-                    } else {
-                        alert('Cannot repeat this type of experiment automatically.');
-                        return;
-                    }
-
-                    // Store parameters in localStorage for the next page
-                    localStorage.setItem('repeatExperimentParams', JSON.stringify(params));
-                    
-                    // Navigate to the appropriate page
-                    window.location.hash = targetPage;
-                    
-                    // Show a message
-                    this.showNotification('Navigating to experiment page...', 'info');
-                } else {
-                    alert('No parameters found for this experiment.');
-                }
-            })
-            .catch(error => {
-                console.error('Error fetching experiment for repeat:', error);
-                alert('Error loading experiment data. Please try again.');
-            });
+        alert('Details functionality not implemented yet for experiment ' + experimentId);
     }
 }
 
 // Create global instance
-const experimentHistory = new ExperimentHistory();
+window.experimentHistory = new ExperimentHistory();
 
-// Also listen for hash changes (page navigation) to check for repeat experiments
-window.addEventListener('hashchange', () => {
-    setTimeout(() => {
-        experimentHistory.checkForRepeatExperiment();
-    }, 500);
+// Listen for when the history page is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    if (document.getElementById('historyContainer')) {
+        window.experimentHistory.init();
+    }
 });
