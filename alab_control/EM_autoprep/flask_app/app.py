@@ -1165,7 +1165,7 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination, 
 '''
 def sem_process_action(voltage, c_height, distance, etime, origin, destination, process_run_id=None, motor1_enabled=False, motor2_enabled=False):
     """
-    Enhanced SEM process action with position tracking integration.
+    Enhanced SEM process action with corrected position validation.
     
     Args:
         voltage: Exposure voltage
@@ -1181,7 +1181,7 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination, 
     Returns:
         Success or error message
     """
-
+    
     # Format voltage and time to 5 characters with leading zeros
     voltage_formatted = f"{int(voltage):05d}"
     etime_formatted = f"{int(etime):05d}"
@@ -1234,6 +1234,7 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination, 
         origin_status = get_position_status('sem', origin)
         if origin_status != 'clean': 
             error_msg = f"ERROR: Origin position {origin} does not contain a clean stub (current status: {origin_status}). Please verify sample tracking on your end."
+            broadcast(error_msg)
             
             # Log the validation error
             if process_run_id:
@@ -1243,8 +1244,22 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination, 
             
             return error_msg
         
-        # Check destination position availability (only if not returning to same tray)
-        if destination != "tray":
+        # CORRECTED DESTINATION VALIDATION LOGIC
+        # Check destination position availability with proper logic for SEM Tray vs SEM Stage
+        if destination == "tray":
+            # Special case: destination="tray" means return to same tray position as origin
+            # This is always allowed since we're returning the stub to where it came from
+            print(f"SEM Tray process: Will return stub from {origin} back to {origin}")
+            
+        elif origin == destination:
+            # SEM Tray process: origin and destination are the same position
+            # This means "pick up stub from position X, expose it, return to position X"
+            # This should be allowed - no additional validation needed
+            print(f"SEM Tray process: Will pick up and return stub to same position {origin}")
+            
+        else:
+            # SEM Stage process: origin and destination are different positions
+            # Destination must be empty (typically a stage position)
             destination_status = get_position_status('sem', destination)
             if destination_status != 'empty':
                 error_msg = f"ERROR: Destination position {destination} is already occupied (current status: {destination_status}). Please verify sample tracking on your end."
@@ -2325,7 +2340,7 @@ def tem_manual_prepare():
     # Use handle_robot_operation directly without control panel check
     return handle_robot_operation(_prepare_operation, robot=global_robot)
 
-def tem_manual_expose(voltage, c_height, distance, time, process_run_id=None, motor1_enabled=False, motor2_enabled=False):
+def tem_manual_expose(voltage, c_height, distance, etime, process_run_id=None, motor1_enabled=False, motor2_enabled=False):
     """
     Consolidated manual TEM exposure with database logging and vibration motor support.
     This replaces both tem_manual_expose and enhanced_tem_manual_expose functions.
@@ -2341,7 +2356,7 @@ def tem_manual_expose(voltage, c_height, distance, time, process_run_id=None, mo
         voltage: Exposure voltage
         c_height: Container height
         distance: Vertical shift
-        time: Exposure time
+        etime: Exposure time  # CHANGED FROM 'time' TO 'etime'
         process_run_id: Optional process run ID for database logging
         motor1_enabled: Enable vibration motor 1
         motor2_enabled: Enable vibration motor 2
@@ -2400,9 +2415,9 @@ def tem_manual_expose(voltage, c_height, distance, time, process_run_id=None, mo
                 control_vibration_motors(motor1_enabled, motor2_enabled, turn_on=True)
                 time.sleep(0.5)  # Brief delay to ensure motors are running
             
-            # Perform exposure
-            print(f"Grid will be exposed to {voltage} kV for {time} ms.")
-            socketio.emit('function_response', {'result': f"Exposing grid to {voltage} kV for {time} ms..."})
+            # Perform exposure - USING CORRECT FUNCTION FROM ORIGINAL
+            print(f"Grid will be exposed to {voltage} kV for {etime} ms.")
+            socketio.emit('function_response', {'result': f"Exposing grid to {voltage} kV for {etime} ms..."})
             control_panel_hvps_setting(voltage_formatted, etime_formatted)
             
             # Wait for exposure to complete
@@ -2763,81 +2778,55 @@ current_remote_operation = None
 
 def state_check():
     """
-    Simplified state check that always returns the last operation result.
-    
-    Returns: JSON string with comprehensive state information
+    Enhanced state check that includes validation error monitoring.
+    Returns the last operation result and any validation errors.
     """
+    global current_remote_operation
+    
     try:
-        # Check if any process is currently running
-        global current_process_runs, current_remote_operation
-        
-        if current_process_runs or current_remote_operation:
-            # System is running an operation
-            operation_info = {}
-            if current_remote_operation:
-                operation_info['current_operation'] = current_remote_operation
-            if current_process_runs:
-                operation_info['active_processes'] = list(current_process_runs.values())
+        # Get the latest system state
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT state, current_operation, last_error, timestamp 
+                FROM system_state 
+                ORDER BY timestamp DESC 
+                LIMIT 1
+            """)
             
-            result = {
-                'status': 'running',
-                'details': operation_info,
-                'timestamp': datetime.now().isoformat()
-            }
-        else:
-            # System is idle - get the last process result
-            result = {
-                'status': 'idle',
-                'timestamp': datetime.now().isoformat()
-            }
+            result = cursor.fetchone()
             
-            # Always get the last process result
-            last_process = get_last_process_result()
-            
-            if last_process:
-                # Always include last operation info
-                result.update({
-                    'last_operation': last_process['process_type'],
-                    'last_operation_result': 'success' if last_process['success'] else 'failed',
-                    'last_operation_timestamp': last_process['timestamp']
-                })
+            if result:
+                state_info = {
+                    'system_state': result[0],
+                    'current_operation': result[1],
+                    'last_error': result[2],
+                    'timestamp': result[3]
+                }
                 
-                # Add details based on success/failure
-                if last_process['success']:
-                    result['last_operation_details'] = f"{last_process['process_type']} completed successfully"
-                    if last_process['duration_seconds']:
-                        result['duration_seconds'] = last_process['duration_seconds']
-                else:
-                    # Include error details for failures
-                    result['last_operation_details'] = last_process['error_message'] or f"{last_process['process_type']} failed"
-                    if last_process['error_category']:
-                        result['error_category'] = last_process['error_category']
-                    if last_process['component']:
-                        result['error_component'] = last_process['component']
+                # Include any recent validation errors from UDP requests
+                if current_remote_operation and current_remote_operation.get('status') == 'error':
+                    # Check if error is recent (within last 30 seconds)
+                    if time.time() - current_remote_operation.get('timestamp', 0) < 30:
+                        state_info['validation_error'] = current_remote_operation.get('message')
                 
-                # Always include parameters if available
-                if last_process['parameters']:
-                    try:
-                        result['last_operation_parameters'] = json.loads(last_process['parameters'])
-                    except:
-                        pass
+                return json.dumps(state_info)
             else:
-                # No previous operations found
-                result.update({
-                    'last_operation': 'none',
-                    'last_operation_result': 'none',
-                    'last_operation_details': 'No previous operations recorded'
+                return json.dumps({
+                    'system_state': 'unknown',
+                    'current_operation': None,
+                    'last_error': None,
+                    'timestamp': None
                 })
-        
-        return json.dumps(result)
-        
+                
     except Exception as e:
-        error_result = {
-            'status': 'error',
-            'error_message': f"State check failed: {str(e)}",
-            'timestamp': datetime.now().isoformat()
+        error_response = {
+            'system_state': 'error',
+            'current_operation': None,
+            'last_error': f"State check failed: {str(e)}",
+            'timestamp': time.time()
         }
-        return json.dumps(error_result)
+        return json.dumps(error_response)
 
 def get_sem_position_status():
     """Get SEM position status for remote monitoring."""
@@ -4693,6 +4682,9 @@ def handle_function():
     if data.get('function') not in function_map:
         print(f"WARNING: Unknown function '{data.get('function')}' not found in function_map!")
     
+    # Add request source identifier for validation
+    data['request_source'] = 'browser'
+    
     result = dispatch_action(data)
     return jsonify({"status": "success", "message": result})
 
@@ -6010,14 +6002,29 @@ def stop_sem_to_stage_test():
 
 def dispatch_action(data):
     """
-    Enhanced dispatch_action with proper state tracking.
-    This replaces both dispatch_action and original_dispatch_action functions.
+    Enhanced dispatch_action with UDP validation and proper state tracking.
+    All functions now use consistent 'etime' parameter naming.
     """
     global soak_test_in_progress, current_process_runs
     
     print("Received data:", data)  # debug line
     function_type = data.get('function')
     identifier = data.get('id')
+    request_source = data.get('request_source', 'unknown')
+    
+    # UDP Parameter Validation - check this FIRST before other validations
+    if request_source == 'udp':
+        is_valid, error_message = validate_udp_parameters(function_type, data)
+        if not is_valid:
+            print(f"UDP validation failed: {error_message}")
+            
+            # Update system state for monitoring
+            update_system_state_with_error(error_message)
+            
+            # Emit error to connected clients
+            socketio.emit('function_response', {'result': error_message}, namespace='/')
+            
+            return error_message
     
     # Check if a soak test is running and block conflicting operations
     if soak_test_in_progress:
@@ -6074,7 +6081,7 @@ def dispatch_action(data):
         return error_msg
     
     try:
-        # Execute the function with appropriate parameters
+        # Execute the function with appropriate parameters - ALL USING 'etime' NOW
         if function_type == 'button':
             result = action_function(identifier)
             
@@ -6083,7 +6090,7 @@ def dispatch_action(data):
                 voltage=data.get('voltage'),
                 c_height=data.get('c_height'),
                 distance=data.get('distance'),
-                etime=data.get('time'),
+                etime=data.get('time'),  # CONSISTENT: etime parameter
                 origin=data.get('origin'),
                 destination=data.get('destination'),
                 process_run_id=process_run_id,
@@ -6096,7 +6103,7 @@ def dispatch_action(data):
                 voltage=data.get('voltage'),
                 c_height=data.get('c_height'),
                 distance=data.get('distance'),
-                etime=data.get('time'),
+                etime=data.get('time'),  # CONSISTENT: etime parameter
                 origin=data.get('origin'),
                 destination=data.get('destination'),
                 skip_laser=data.get('skip_laser', False),
@@ -6105,20 +6112,23 @@ def dispatch_action(data):
                 motor2_enabled=data.get('motor2_enabled', False)
             )
             
-        elif function_type in ['tem_manual_prepare', 'tem_manual_expose', 'tem_manual_complete']:
-            if function_type == 'tem_manual_expose':
-                result = action_function(
-                    voltage=data.get('voltage'),
-                    c_height=data.get('c_height'),
-                    distance=data.get('distance'),
-                    time=data.get('time'),
-                    process_run_id=process_run_id,
-                    motor1_enabled=data.get('motor1_enabled', False),
-                    motor2_enabled=data.get('motor2_enabled', False)
-                )
-            else:
-                result = action_function(process_run_id=process_run_id)
-                
+        elif function_type == 'tem_manual_prepare':
+            result = action_function(process_run_id=process_run_id)
+            
+        elif function_type == 'tem_manual_expose':
+            result = action_function(
+                voltage=data.get('voltage'),
+                c_height=data.get('c_height'),
+                distance=data.get('distance'),
+                etime=data.get('time'),  # CONSISTENT: etime parameter
+                process_run_id=process_run_id,
+                motor1_enabled=data.get('motor1_enabled', False),
+                motor2_enabled=data.get('motor2_enabled', False)
+            )
+            
+        elif function_type == 'tem_manual_complete':
+            result = action_function(process_run_id=process_run_id)
+            
         elif function_type == 'robot_manual_move':
             result = action_function(
                 x=data.get('x'),
@@ -6223,12 +6233,12 @@ def extract_parameters_for_logging(function_type, data):
             'voltage': data.get('voltage'),
             'c_height': data.get('c_height'),
             'distance': data.get('distance'),
-            'time': data.get('time'),
+            'etime': data.get('time'), 
             'origin': data.get('origin'),
             'destination': data.get('destination'),
             'skip_laser': data.get('skip_laser', False) if function_type == 'tem_process' else None,
-            'project_name': data.get('project_name'),  # New field
-            'composition': data.get('composition')     # New field
+            'project_name': data.get('project_name'),
+            'composition': data.get('composition')
         }
     elif function_type == 'robot_manual_move':
         return {
@@ -6292,6 +6302,10 @@ def udp_server():
 
                 # Process the command and get result
                 params = parse_udp_message(message)
+                
+                # Add request source identifier for validation
+                params['request_source'] = 'udp'
+                
                 result = dispatch_action(params)
                 print("Result:", result)
 
@@ -6310,7 +6324,7 @@ def udp_server():
                 error_msg = f"Error in UDP server: {str(e)}"
                 print(error_msg)
                 socketio.emit('function_response', {'result': error_msg}, namespace='/')
-
+                
 # Helper function to parse UDP messages in key=value format
 def parse_udp_message(message):
     """Parse UDP messages in key=value format and strip whitespace from values."""
@@ -6328,6 +6342,50 @@ def parse_udp_message(message):
         return params
     except ValueError:
         return {}
+
+def validate_udp_parameters(function_type, data):
+    """
+    Validate that UDP requests contain mandatory project_name and composition fields.
+    
+    Args:
+        function_type: The function being called
+        data: The parameter data
+    
+    Returns:
+        tuple: (is_valid, error_message)
+    """
+    # Define which functions require mandatory validation for UDP
+    udp_mandatory_functions = ['sem_process', 'tem_process', 'tem_manual_expose']
+    
+    if function_type not in udp_mandatory_functions:
+        return True, None
+    
+    missing_params = []
+    
+    # Check for project_name
+    if not data.get('project_name') or str(data.get('project_name')).strip() == '':
+        missing_params.append('project_name')
+    
+    # Check for composition  
+    if not data.get('composition') or str(data.get('composition')).strip() == '':
+        missing_params.append('composition')
+    
+    if missing_params:
+        error_msg = f"ERROR: missing parameters: {', '.join(missing_params)}"
+        return False, error_msg
+    
+    return True, None
+
+def update_system_state_with_error(error_message):
+    """
+    Update system state to include validation error for state_check monitoring.
+    """
+    global current_remote_operation
+    current_remote_operation = {
+        'status': 'error',
+        'message': error_message,
+        'timestamp': time.time()
+    }
 
 if __name__ == '__main__':
     # Initialize the application and database
