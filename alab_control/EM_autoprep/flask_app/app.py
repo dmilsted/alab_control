@@ -187,6 +187,27 @@ def broadcast(message):
     print(message)
     socketio.emit('function_response', {'result': message})
 
+def get_meaningful_error_message(result, context=""):
+    """
+    Convert operation results to meaningful error messages for logging.
+    
+    Args:
+        result: The result returned by the action function
+        context: Additional context about what failed
+    
+    Returns:
+        str: A meaningful error message
+    """
+    if isinstance(result, bool) and result is False:
+        if context:
+            return f"Operation failed: {context}"
+        else:
+            return "Operation failed due to control panel or robot connection issues"
+    elif isinstance(result, str):
+        return result
+    else:
+        return str(result)
+
 class SamplePrepEnder3(Ender3):
     # positions
     clean_disk_pos = read_CSV_into_positions(
@@ -6192,9 +6213,13 @@ def dispatch_action(data):
                 update_system_state('idle', function_type, None)
             else:
                 end_process_run(process_run_id, False, "Process_Failed", time.time() - start_time)
-                log_error(process_run_id, str(result), "process")
+                
+                # Use meaningful error message instead of just str(result)
+                error_message = get_meaningful_error_message(result, "process execution")
+                log_error(process_run_id, error_message, "process")
+                
                 # UPDATE SYSTEM STATE BACK TO IDLE WITH ERROR
-                update_system_state('idle', function_type, str(result))
+                update_system_state('idle', function_type, error_message)
             
             # Clean up tracking
             current_process_runs.pop(process_run_id, None)
@@ -6204,7 +6229,8 @@ def dispatch_action(data):
             if success:
                 update_system_state('idle', function_type, None)
             else:
-                update_system_state('idle', function_type, str(result))
+                error_message = get_meaningful_error_message(result, "operation")
+                update_system_state('idle', function_type, error_message)
         
         return result
     
