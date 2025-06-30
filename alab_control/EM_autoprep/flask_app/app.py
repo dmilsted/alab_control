@@ -2778,52 +2778,89 @@ current_remote_operation = None
 
 def state_check():
     """
-    Enhanced state check that includes validation error monitoring.
-    Returns the last operation result and any validation errors.
+    Enhanced state check that properly handles both running and idle states.
+    
+    Logic:
+    - If machine is running: Returns current operation info
+    - If machine is idle: Returns last completed operation info  
+    - All errors (validation, execution, system) are treated as operation errors
+    
+    Returns:
+        JSON string with system state information
     """
-    global current_remote_operation
     
     try:
-        # Get the latest system state
+        # Get the latest system state from database
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT state, current_operation, last_error, timestamp 
+                SELECT current_state, last_operation, last_error_message, last_updated 
                 FROM system_state 
-                ORDER BY timestamp DESC 
-                LIMIT 1
+                WHERE id = 1
             """)
             
             result = cursor.fetchone()
             
             if result:
-                state_info = {
-                    'system_state': result[0],
-                    'current_operation': result[1],
-                    'last_error': result[2],
-                    'timestamp': result[3]
-                }
+                current_state = result[0]
+                last_operation = result[1] 
+                last_error_message = result[2]
+                last_updated = result[3]
                 
-                # Include any recent validation errors from UDP requests
-                if current_remote_operation and current_remote_operation.get('status') == 'error':
-                    # Check if error is recent (within last 30 seconds)
-                    if time.time() - current_remote_operation.get('timestamp', 0) < 30:
-                        state_info['validation_error'] = current_remote_operation.get('message')
+                # Build response based on current state
+                if current_state == 'running':
+                    # Machine is actively running - show current operation
+                    state_info = {
+                        'system_state': 'running',
+                        'current_operation': last_operation,  # This is the operation currently running
+                        'last_operation_error': last_error_message,  # Any error from current operation
+                        'timestamp': last_updated
+                    }
+                elif current_state == 'idle':
+                    # Machine is idle - show last completed/attempted operation
+                    state_info = {
+                        'system_state': 'idle', 
+                        'current_operation': None,  # No current operation
+                        'last_operation': last_operation,  # Show what was last attempted/completed
+                        'last_operation_error': last_error_message,  # Error from last operation (or None if successful)
+                        'timestamp': last_updated
+                    }
+                elif current_state == 'error':
+                    # Machine has an error state
+                    state_info = {
+                        'system_state': 'error',
+                        'current_operation': None,
+                        'last_operation': last_operation,
+                        'last_operation_error': last_error_message, 
+                        'timestamp': last_updated
+                    }
+                else:
+                    # Unknown state - fallback
+                    state_info = {
+                        'system_state': current_state,
+                        'current_operation': last_operation,
+                        'last_operation_error': last_error_message,
+                        'timestamp': last_updated
+                    }
                 
                 return json.dumps(state_info)
             else:
+                # No system state found in database
                 return json.dumps({
                     'system_state': 'unknown',
                     'current_operation': None,
-                    'last_error': None,
+                    'last_operation': None,
+                    'last_operation_error': None,
                     'timestamp': None
                 })
                 
     except Exception as e:
+        # Database query failed
         error_response = {
             'system_state': 'error',
             'current_operation': None,
-            'last_error': f"State check failed: {str(e)}",
+            'last_operation': None,
+            'last_operation_error': f"State check failed: {str(e)}",
             'timestamp': time.time()
         }
         return json.dumps(error_response)
@@ -6018,8 +6055,9 @@ def dispatch_action(data):
         if not is_valid:
             print(f"UDP validation failed: {error_message}")
             
-            # Update system state for monitoring
-            update_system_state_with_error(error_message)
+            # TREAT VALIDATION ERROR AS OPERATION ERROR
+            # Update database with validation error as last_operation_error
+            update_system_state('idle', function_type, error_message)
             
             # Emit error to connected clients
             socketio.emit('function_response', {'result': error_message}, namespace='/')
@@ -6040,6 +6078,10 @@ def dispatch_action(data):
                         "Please stop the soak test before performing other operations. "
                         "Visit the soak test page to manage the running test.")
             print(f"Operation blocked due to soak test: {function_type}")
+            
+            # TREAT SOAK TEST BLOCKING AS OPERATION ERROR
+            update_system_state('idle', function_type, error_msg)
+            
             socketio.emit('function_response', {'result': error_msg})
             return error_msg
     
@@ -6075,9 +6117,11 @@ def dispatch_action(data):
             log_error(process_run_id, error_msg, "system")
             end_process_run(process_run_id, False, "User_Error", time.time() - start_time)
             # UPDATE SYSTEM STATE BACK TO IDLE WITH ERROR
-            update_system_state('idle', function_type, None)
+            update_system_state('idle', function_type, error_msg)
         else:
             log_standalone_error(error_msg, "system")
+            # UPDATE SYSTEM STATE WITH ERROR EVEN FOR NON-LOGGED FUNCTIONS
+            update_system_state('idle', function_type, error_msg)
         return error_msg
     
     try:
@@ -6090,7 +6134,7 @@ def dispatch_action(data):
                 voltage=data.get('voltage'),
                 c_height=data.get('c_height'),
                 distance=data.get('distance'),
-                etime=data.get('time'),  # CONSISTENT: etime parameter
+                etime=data.get('time'),  # Changed from 'etime' to match the UDP parameter
                 origin=data.get('origin'),
                 destination=data.get('destination'),
                 process_run_id=process_run_id,
@@ -6103,7 +6147,7 @@ def dispatch_action(data):
                 voltage=data.get('voltage'),
                 c_height=data.get('c_height'),
                 distance=data.get('distance'),
-                etime=data.get('time'),  # CONSISTENT: etime parameter
+                etime=data.get('time'),  # Changed from 'etime' to match the UDP parameter
                 origin=data.get('origin'),
                 destination=data.get('destination'),
                 skip_laser=data.get('skip_laser', False),
@@ -6112,27 +6156,21 @@ def dispatch_action(data):
                 motor2_enabled=data.get('motor2_enabled', False)
             )
             
-        elif function_type == 'tem_manual_prepare':
-            result = action_function(process_run_id=process_run_id)
-            
         elif function_type == 'tem_manual_expose':
             result = action_function(
                 voltage=data.get('voltage'),
                 c_height=data.get('c_height'),
                 distance=data.get('distance'),
-                etime=data.get('time'),  # CONSISTENT: etime parameter
+                etime=data.get('time'),  # Changed from 'etime' to match the UDP parameter
                 process_run_id=process_run_id,
                 motor1_enabled=data.get('motor1_enabled', False),
                 motor2_enabled=data.get('motor2_enabled', False)
             )
             
-        elif function_type == 'tem_manual_complete':
-            result = action_function(process_run_id=process_run_id)
-            
         elif function_type == 'robot_manual_move':
             result = action_function(
                 x=data.get('x'),
-                y=data.get('y'),
+                y=data.get('y'), 
                 z=data.get('z'),
                 c3dp_speed=data.get('c3dp_speed')
             )
@@ -6146,20 +6184,27 @@ def dispatch_action(data):
         
         # Log completion using improved success determination
         if process_run_id and current_process_runs.get(process_run_id):
-            success = determine_operation_success(result)  # Use the renamed function
+            success = determine_operation_success(result)
             
             if success:
                 end_process_run(process_run_id, True, "Success", time.time() - start_time)
-                # UPDATE SYSTEM STATE BACK TO IDLE (SUCCESS)
+                # UPDATE SYSTEM STATE BACK TO IDLE (SUCCESS - CLEAR ERROR)
                 update_system_state('idle', function_type, None)
             else:
                 end_process_run(process_run_id, False, "Process_Failed", time.time() - start_time)
                 log_error(process_run_id, str(result), "process")
-                # UPDATE SYSTEM STATE BACK TO IDLE (ERROR WILL BE FOUND VIA QUERY)
-                update_system_state('idle', function_type, None)
+                # UPDATE SYSTEM STATE BACK TO IDLE WITH ERROR
+                update_system_state('idle', function_type, str(result))
             
             # Clean up tracking
             current_process_runs.pop(process_run_id, None)
+        else:
+            # For non-logged functions, still update state appropriately
+            success = determine_operation_success(result)
+            if success:
+                update_system_state('idle', function_type, None)
+            else:
+                update_system_state('idle', function_type, str(result))
         
         return result
     
@@ -6171,10 +6216,12 @@ def dispatch_action(data):
             log_error(process_run_id, error_msg, "application")
             end_process_run(process_run_id, False, "Application_Error", time.time() - start_time)
             current_process_runs.pop(process_run_id, None)
-            # UPDATE SYSTEM STATE BACK TO IDLE (ERROR LOGGED)
-            update_system_state('idle', function_type, None)
+            # UPDATE SYSTEM STATE BACK TO IDLE WITH ERROR
+            update_system_state('idle', function_type, error_msg)
         else:
             log_standalone_error(error_msg, "application")
+            # UPDATE SYSTEM STATE WITH ERROR EVEN FOR NON-LOGGED FUNCTIONS
+            update_system_state('idle', function_type, error_msg)
         
         return error_msg
 
@@ -6375,17 +6422,6 @@ def validate_udp_parameters(function_type, data):
         return False, error_msg
     
     return True, None
-
-def update_system_state_with_error(error_message):
-    """
-    Update system state to include validation error for state_check monitoring.
-    """
-    global current_remote_operation
-    current_remote_operation = {
-        'status': 'error',
-        'message': error_message,
-        'timestamp': time.time()
-    }
 
 if __name__ == '__main__':
     # Initialize the application and database
