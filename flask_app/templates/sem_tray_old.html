@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SEM Sample Autoprep System</title>
+    <script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const socket = io();
+
+            // Listen for responses from the server via Socket.IO
+            socket.on('function_response', function(data) {
+                const terminalContent = document.getElementById('response');
+                const line = document.createElement('div');
+                line.textContent = JSON.stringify(data.result);
+                terminalContent.appendChild(line);
+
+                // Limit terminal output to the last 10 lines
+                if (terminalContent.children.length > 10) {
+                    terminalContent.removeChild(terminalContent.firstChild);
+                }
+
+                terminalContent.scrollTop = terminalContent.scrollHeight;
+            });
+
+            // Handle form submission
+            document.getElementById('semTrayForm').addEventListener('submit', function(event) {
+                event.preventDefault();  // Prevent traditional form submission
+                
+                const formData = new FormData(this);
+                const formObject = Object.fromEntries(formData.entries());
+
+                // Send form data to server as JSON
+                fetch('/handle_function', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(formObject)
+                })
+                .then(response => {
+                    if (!response.ok) throw new Error('Network response was not ok');
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Server response:', data);
+                })
+                .catch(error => console.error('Error in form submission:', error));
+            });
+        });
+    </script>
+</head>
+<body>
+    <div class="title-card">
+        <h1>SEM Sample Autoprep System</h1>
+        <button type="button" class="btn btn-primary" onclick="window.location.href='{{ url_for('index') }}'">Go back</button>
+    </div>
+
+    <div class="wrapper">
+        <div class="form-container">
+            <div class="form-card">
+                <h1>Settings:</h1>
+                <form id="semTrayForm">
+                    <input type="hidden" name="function" value="process">
+                    <div class="form-group">
+                        <label for="voltage">Exposure Voltage:</label>
+                        <input type="text" id="voltage" name="voltage" placeholder="Enter exposure voltage (ms)" value="10000">
+                        <small class="form-text text-muted">Minimum: 1000, Maximum: 25000</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="distance">Vertical shift:</label>
+                        <input type="text" id="distance" name="distance" placeholder="Enter Vertical shift distance (mm, decimal)" value="18">
+                        <small class="form-text text-muted">Values in mm. Lowest: -25.0, Highest: 25.0</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="time">Exposure Time:</label>
+                        <input type="text" id="time" name="time" placeholder="Enter exposure time (ms)" value="5000">
+                        <small class="form-text text-muted">Minimum: 0, Maximum: 9999</small>
+                    </div>
+
+                    <div class="form-group">
+                        <h2>Origin and Destination Positions</h2>
+                        <small class="form-text text-muted">Check the image and type the positions. Origin and Destination can be the same</small>
+                        <label for="origin">Origin:</label>
+                        <input type="text" id="origin" name="origin" placeholder="Enter origin position" value="A1">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="destination">Destination:</label>
+                        <input type="text" id="destination" name="destination" placeholder="Enter destination position" value="A1">
+                    </div>
+
+                    <div class="button-group">
+                        <button type="submit" class="btn btn-secondary">Prepare sample!</button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="form-card">
+                <h2>Terminal Output:</h2>
+                <div id="response" class="terminal-output"></div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,173 @@
+/* General Page Styling */
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f2f2f2;
+    /*display: flex; */
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
+    margin: 0;
+    padding: 20px;
+}
+
+/* Container for the form cards */
+.form-container {
+    display: flex; /* Use flexbox for horizontal layout */
+    justify-content: space-between; /* Space between the cards */
+    align-items: flex-start; /* Align cards to the start vertically */
+    margin: 20px; /* Add some margin around the container */
+}
+
+/* Centering and padding for form-card */
+.form-card {
+    flex: 1; /* Allow the input card to grow */
+    margin: 10px; /* Space between cards */
+    padding: 20px; /* Padding inside the card */
+    background-color: #ffffff; /* Card background color */
+    border: 1px solid #ccc; /* Border around the card */
+    border-radius: 8px; /* Rounded corners */
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1); /* Shadow effect */
+}
+
+/* Title Card Styling */
+.title-card {
+    display: block !important; /* Ensure it behaves like an inline-block */
+    width: 100%; /* Adjust as needed */
+    max-width: 800px; /* Set a maximum width for the title card */
+    margin: 0 auto; /* Center the title card */
+    padding: 20px; /* Add padding for spacing */
+    background-color: #ffffff; /* Background color */
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1); /* Optional shadow effect */
+    border-radius: 8px; /* Rounded corners */
+    text-align: center; /* Center the text */
+    margin-bottom: 20px; /* Space below the title card */
+}
+
+/* Title Styling */
+.title-card h1 {
+    margin: 0; /* Remove default margin */
+    font-size: 24px; /* Font size for the title */
+}
+
+/* Image card styling */
+.image-card {
+    width: 300px; /* Set a fixed width for the image card */
+    display: flex; /* Use flexbox for the image */
+    flex-direction: column; /* Stack elements vertically */
+    align-items: center; /* Center the content */
+}
+
+/* Image styling */
+.image {
+    max-width: 100%;
+    height: 400px; /* Adjust this value for vertical aspect ratio */
+    object-fit: cover; /* Crop the image if necessary */
+    border-radius: 8px; /* Rounded corners for the image */
+}
+
+/* Space between elements in form-card */
+.form-card > * {
+    margin-bottom: 15px; /* Add space between elements */
+}
+
+/* Optional: Increase the padding on the bottom to give extra space for terminal */
+.form-card {
+    padding-bottom: 20px; /* Increase bottom padding if needed */
+}
+
+/* Styling for the response div to mimic a terminal */
+#response {
+    background-color: #1e1e1e; /* Dark background for terminal */
+    color: #d4d4d4; /* Light text for readability */
+    padding: 15px; /* Padding inside the terminal box */
+    border-radius: 5px; /* Rounded corners */
+    margin-top: 15px; /* Space above the terminal */
+    font-family: monospace; /* Monospaced font for terminal feel */
+    max-height: 250px; /* Max height to allow scrolling */
+    min-height: 180px; /* Minimum height for terminal-like look */
+    overflow-y: auto; /* Enable scroll if content exceeds max height */
+    width: 100%; /* Full width of the container */
+    min-width: 450px; /* Minimum width for a terminal window look */
+    box-sizing: border-box; /* Include padding within width/height */
+}
+
+/* Label and Input Alignment */
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-bottom: 15px;
+}
+
+/* Button Group */
+.button-group {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+    margin-top: 20px;
+}
+
+/* Input Field Styling */
+input[type="text"] {
+    width: 90%; /* Use relative width */
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 1em;
+    transition: border-color 0.3s;
+}
+
+/* Input Field Focus Effect */
+input[type="text"]:focus {
+    border-color: #3f51b5;
+    outline: none;
+}
+
+/* Radio Button Group Styling */
+.radio-group {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+}
+
+.radio-group label {
+    font-weight: normal;
+    color: #555;
+}
+
+/* Button Styles */
+.btn {
+    padding: 10px 15px;
+    border: none;
+    border-radius: 4px;
+    font-size: 1em;
+    cursor: pointer;
+    text-align: center;
+    transition: background-color 0.3s;
+}
+
+/* Primary Button Style */
+.btn-primary {
+    background-color: #3f51b5;
+    color: white;
+}
+
+.btn-primary:hover {
+    background-color: #303f9f;
+}
+
+/* Secondary Button Style */
+.btn-secondary {
+    background-color: #f44336;
+    color: white;
+}
+
+.btn-secondary:hover {
+    background-color: #d32f2f;
+}
+
+.wrapper {
+    display: flex; /* or block depending on how you want to layout */
+    flex-direction: column; /* or row if you want the cards to be horizontal */
+    align-items: center; /* Center cards if necessary */
+}

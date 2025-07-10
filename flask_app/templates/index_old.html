@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EM Autoprep - Index</title>
+    <script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="title-card">
+        <h1>EM Autoprep System</h1>
+    </div>
+
+    <div class="wrapper">
+        <div class="form-container">
+            <div class="form-card">
+                <div class="button-group">
+                    <button class="btn btn-primary" onclick="callFunction('button1')">Button 1</button>
+                    <button class="btn btn-primary" onclick="window.location.href='{{ url_for('sem_tray_page') }}'">SEM Tray Prep</button>
+                    <button class="btn btn-primary" onclick="window.location.href='{{ url_for('sem_stage_page') }}'">SEM Stage Prep</button>
+                    <button class="btn btn-primary" onclick="window.location.href='{{ url_for('tem_page') }}'">TEM Prep</button>
+                    <button class="btn btn-primary" onclick="callFunction('button3')">Button 3</button>
+                    <button class="btn btn-primary" onclick="callFunction('button4')">Button 4</button>
+                </div>
+            </div>
+
+            <div class="form-card">
+                <h2>Terminal Output:</h2>
+                <div id="response" class="terminal-output"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize socket connection
+        const socket = io();
+        const responseDiv = document.getElementById("response");
+
+        // Function to call server functions
+        function callFunction(id) {
+            console.log("Button clicked:", id);
+            fetch('/handle_function', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    function: 'button',
+                    id: id
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Success:', data);
+                addMessage(data.message);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                addMessage('Error: ' + error);
+            });
+        }
+
+        // Listen for socket responses
+        socket.on('function_response', function(data) {
+            console.log("Received socket response:", data);
+            addMessage(data.result);
+        });
+
+        // Function to add messages to the terminal
+        function addMessage(message) {
+            const line = document.createElement("div");
+            line.textContent = message;
+            responseDiv.appendChild(line);
+
+            // Keep only last 10 messages
+            if (responseDiv.children.length > 10) {
+                responseDiv.removeChild(responseDiv.firstChild);
+            }
+
+            // Auto-scroll to bottom
+            responseDiv.scrollTop = responseDiv.scrollHeight;
+        }
+    </script>
+</body>
+</html>

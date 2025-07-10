@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SEM Pick & Place Soak Test - EM Autoprep</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <style>
+        .test-config-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin: 20px 0;
+        }
+        
+        .config-section {
+            background-color: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .progress-section {
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 25px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background-color: #28a745;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+        
+        .position-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 5px;
+            margin: 15px 0;
+            max-width: 200px;
+        }
+        
+        .position-indicator {
+            width: 40px;
+            height: 40px;
+            border: 2px solid #ccc;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+        
+        .position-pending {
+            background-color: #f8f9fa;
+            color: #6c757d;
+        }
+        
+        .position-current {
+            background-color: #ffc107;
+            color: white;
+            border-color: #ffc107;
+        }
+        
+        .position-success {
+            background-color: #28a745;
+            color: white;
+            border-color: #28a745;
+        }
+        
+        .position-failed {
+            background-color: #dc3545;
+            color: white;
+            border-color: #dc3545;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 15px;
+            margin: 15px 0;
+        }
+        
+        .stat-box {
+            background-color: white;
+            padding: 15px;
+            border-radius: 6px;
+            text-align: center;
+            border: 1px solid #dee2e6;
+        }
+        
+        .stat-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #3f51b5;
+        }
+        
+        .stat-label {
+            font-size: 0.8em;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .test-controls {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin: 20px 0;
+        }
+        
+        .alert {
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+        
+        .alert-warning {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+        }
+        
+        .alert-info {
+            background-color: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        
+        .alert-success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        
+        .alert-danger {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        
+        .radio-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .disabled {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <div class="content-area">
+            <!-- Header -->
+            <div class="control-panel">
+                <h1>🔄 SEM Pick & Place Soak Test</h1>
+                <div>
+                    <button class="btn btn-secondary" onclick="window.location.href='/soak_tests'" style="margin-right: 10px;">
+                        <i class="fas fa-arrow-left"></i> Back to Dashboard
+                    </button>
+                    <button class="btn btn-primary" onclick="window.location.reload()">
+                        <i class="fas fa-refresh"></i> Refresh
+                    </button>
+                </div>
+            </div>
+
+            <!-- Test Status Alert -->
+            {% if test_session and test_session.status == 'running' %}
+            <div class="alert alert-info">
+                <strong><i class="fas fa-play"></i> Test Currently Running</strong><br>
+                Started: {{ test_session.start_time[:19] }} | 
+                Current Cycle: {{ test_session.current_cycle }}/{{ test_session.target_cycles }} |
+                Current Position: {{ test_session.current_position or 'Initializing...' }}
+            </div>
+            {% elif test_session and test_session.status == 'paused' %}
+            <div class="alert alert-warning">
+                <strong><i class="fas fa-pause"></i> Test Paused</strong><br>
+                You can resume the test or stop it completely.
+            </div>
+            {% elif test_session and test_session.status == 'completed' %}
+            <div class="alert alert-success">
+                <strong><i class="fas fa-check"></i> Test Completed Successfully</strong><br>
+                Completed: {{ test_session.end_time[:19] }} | 
+                Success Rate: {{ "%.1f"|format(test_session.final_success_rate) }}%
+            </div>
+            {% elif test_session and test_session.status == 'failed' %}
+            <div class="alert alert-danger">
+                <strong><i class="fas fa-times"></i> Test Failed</strong><br>
+                Failed: {{ test_session.end_time[:19] }} | 
+                Reason: {{ test_session.failure_reason or 'Unknown error' }}
+            </div>
+            {% endif %}
+
+            <!-- Main Content Grid -->
+            <div class="test-config-grid">
+                <!-- Configuration Section -->
+                <div class="config-section">
+                    <h2>Test Configuration</h2>
+                    
+                    {% if not test_session or test_session.status in ['completed', 'failed'] %}
+                    <form id="testConfigForm">
+                        <div class="form-group">
+                            <label for="cycles">Number of Cycles:</label>
+                            <input type="number" id="cycles" name="cycles" min="1" max="1000" value="5" required>
+                            <small>Each cycle tests all 15 positions (A1-E3)</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="max_retries">Max Retries per Position:</label>
+                            <input type="number" id="max_retries" name="max_retries" min="1" max="10" value="3" required>
+                            <small>Maximum attempts before marking position as failed</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Failure Handling:</label>
+                            <div class="radio-group">
+                                <div class="radio-option">
+                                    <input type="radio" id="fail_skip" name="failure_handling" value="skip" checked>
+                                    <label for="fail_skip">Skip failed positions and continue</label>
+                                </div>
+                                <div class="radio-option">
+                                    <input type="radio" id="fail_retry" name="failure_handling" value="retry">
+                                    <label for="fail_retry">Retry failed positions up to max retries</label>
+                                </div>
+                                <div class="radio-option">
+                                    <input type="radio" id="fail_stop" name="failure_handling" value="stop">
+                                    <label for="fail_stop">Stop test on first failure</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Partial Cycle Recovery:</label>
+                            <div class="radio-group">
+                                <div class="radio-option">
+                                    <input type="radio" id="recover_continue" name="recovery_mode" value="continue" checked>
+                                    <label for="recover_continue">Continue from last position</label>
+                                </div>
+                                <div class="radio-option">
+                                    <input type="radio" id="recover_restart" name="recovery_mode" value="restart">
+                                    <label for="recover_restart">Restart current cycle</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="test-controls">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-play"></i> Start Test
+                            </button>
+                        </div>
+                    </form>
+                    {% else %}
+                    <!-- Show current configuration when test is running -->
+                    <div>
+                        <p><strong>Cycles:</strong> {{ test_session.target_cycles }}</p>
+                        <p><strong>Max Retries:</strong> {{ test_session.max_retries }}</p>
+                        <p><strong>Failure Handling:</strong> {{ test_session.failure_handling.title() }}</p>
+                        <p><strong>Recovery Mode:</strong> {{ test_session.recovery_mode.title() }}</p>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- Progress Section -->
+                <div class="config-section">
+                    <h2>Test Progress</h2>
+                    
+                    {% if test_session and test_session.status in ['running', 'paused'] %}
+                    <!-- Cycle Progress -->
+                    <div style="margin-bottom: 20px;">
+                        <label>Cycle Progress:</label>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: {{ (test_session.current_cycle / test_session.target_cycles * 100) if test_session.target_cycles > 0 else 0 }}%">
+                                {{ test_session.current_cycle }}/{{ test_session.target_cycles }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Position Progress -->
+                    <div style="margin-bottom: 20px;">
+                        <label>Current Cycle Positions:</label>
+                        <div class="position-grid">
+                            {% for position in ['E1', 'E2', 'E3', 'D1', 'D2', 'D3', 'C1', 'C2', 'C3', 'B1', 'B2', 'B3', 'A1', 'A2', 'A3'] %}
+                            <div class="position-indicator 
+                                {% if position == test_session.current_position %}position-current
+                                {% elif position in (test_session.completed_positions or []) %}position-success
+                                {% elif position in (test_session.failed_positions or []) %}position-failed
+                                {% else %}position-pending{% endif %}">
+                                {{ position }}
+                            </div>
+                            {% endfor %}
+                        </div>
+                        <small>🟡 Current | 🟢 Success | 🔴 Failed | ⚪ Pending</small>
+                    </div>
+
+                    <!-- Test Controls -->
+                    <div class="test-controls">
+                        {% if test_session.status == 'running' %}
+                        <button class="btn btn-secondary" onclick="pauseTest()">
+                            <i class="fas fa-pause"></i> Pause Test
+                        </button>
+                        {% elif test_session.status == 'paused' %}
+                        <button class="btn btn-primary" onclick="resumeTest()">
+                            <i class="fas fa-play"></i> Resume Test
+                        </button>
+                        {% endif %}
+                        
+                        <button class="btn btn-danger" onclick="stopTest()">
+                            <i class="fas fa-stop"></i> Stop Test
+                        </button>
+                    </div>
+                    {% else %}
+                    <div style="text-align: center; color: #666; padding: 40px;">
+                        <i class="fas fa-info-circle" style="font-size: 2em; margin-bottom: 15px;"></i>
+                        <p>Configure and start a test to see progress here.</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Statistics Section -->
+            {% if test_session %}
+            <div class="progress-section">
+                <h2>Test Statistics</h2>
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-value">{{ "%.1f"|format(test_session.current_success_rate or 0) }}%</div>
+                        <div class="stat-label">Success Rate</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">{{ test_session.total_operations or 0 }}</div>
+                        <div class="stat-label">Total Operations</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">{{ test_session.successful_operations or 0 }}</div>
+                        <div class="stat-label">Successful</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">{{ test_session.failed_operations or 0 }}</div>
+                        <div class="stat-label">Failed</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">
+                            {% if test_session.estimated_completion %}
+                                {{ test_session.estimated_completion[:5] }}
+                            {% else %}
+                                --:--
+                            {% endif %}
+                        </div>
+                        <div class="stat-label">Est. Completion</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">
+                            {% if test_session.elapsed_time_minutes %}
+                                {{ "%.1f"|format(test_session.elapsed_time_minutes) }}m
+                            {% else %}
+                                0m
+                            {% endif %}
+                        </div>
+                        <div class="stat-label">Elapsed Time</div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Recent Errors Section -->
+            {% if recent_errors %}
+            <div class="form-card">
+                <h2>Recent Errors</h2>
+                <div style="max-height: 200px; overflow-y: auto;">
+                    {% for error in recent_errors %}
+                    <div style="padding: 8px; border-bottom: 1px solid #eee;">
+                        <strong>{{ error.timestamp[:19] }}</strong> - {{ error.position }} - {{ error.error_message }}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+        // Form submission
+        document.getElementById('testConfigForm')?.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            const config = Object.fromEntries(formData.entries());
+            
+            if (confirm(`Start SEM Pick & Place test with ${config.cycles} cycles?`)) {
+                fetch('/soak_tests/sem_pick_place/start', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(config)
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        window.location.reload();
+                    } else {
+                        alert('Error starting test: ' + (data.message || 'Unknown error'));
+                    }
+                })
+                .catch(error => {
+                    alert('Error: ' + error);
+                });
+            }
+        });
+
+        // Test control functions
+        function pauseTest() {
+            if (confirm('Pause the current test?')) {
+                fetch('/soak_tests/sem_pick_place/pause', {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        window.location.reload();
+                    } else {
+                        alert('Error pausing test: ' + (data.message || 'Unknown error'));
+                    }
+                })
+                .catch(error => {
+                    alert('Error: ' + error);
+                });
+            }
+        }
+
+        function resumeTest() {
+            if (confirm('Resume the paused test?')) {
+                fetch('/soak_tests/sem_pick_place/resume', {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        window.location.reload();
+                    } else {
+                        alert('Error resuming test: ' + (data.message || 'Unknown error'));
+                    }
+                })
+                .catch(error => {
+                    alert('Error: ' + error);
+                });
+            }
+        }
+
+        function stopTest() {
+            if (confirm('Stop the current test? This cannot be undone.')) {
+                fetch('/soak_tests/sem_pick_place/stop', {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        window.location.reload();
+                    } else {
+                        alert('Error stopping test: ' + (data.message || 'Unknown error'));
+                    }
+                })
+                .catch(error => {
+                    alert('Error: ' + error);
+                });
+            }
+        }
+
+        // Auto-refresh page every 15 seconds if test is running
+        {% if test_session and test_session.status in ['running', 'paused'] %}
+        setTimeout(() => {
+            window.location.reload();
+        }, 15000);
+        {% endif %}

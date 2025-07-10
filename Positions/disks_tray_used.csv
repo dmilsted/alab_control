@@ -1,0 +1,23 @@
+This file contains robot (x, y, z) position data for used disks on the TEM disk tray.
+
+Format: position name | x | y | z
+
+Position names like <NAME># move only the printer bed and the robot head (Z is None).  
+Position names like <NAME>_Z# move the robot head vertically and only have a Z value (X and Y are None).
+
+Created by: David Milsted
+Last updated: 2025-05-12
+---
+TE1,135.7,132.8,None
+TE2,23.8,173.8,None
+TE3,23.8,173.8,None
+TE4,23.8,173.8,None
+TE5,23.8,173.8,None
+TE6,23.8,173.8,None
+TE7,23.8,173.8,None
+TE8,23.8,173.8,None
+TE9,23.8,173.8,None
+TE10,23.8,173.8,None
+TETRAY_Z1,None,None,69
+TETRAY_Z2,None,None,70.5
+TETRAY_Z3,None,None,72
