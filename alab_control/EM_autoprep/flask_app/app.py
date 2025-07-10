@@ -872,6 +872,7 @@ def home_robot_manual():
             return False
 
     return handle_robot_operation(_home_operation, robot=global_robot)
+
 ''' Backup of the previous SEM process action before position tracking
 def sem_process_action(voltage, c_height, distance, etime, origin, destination, process_run_id=None, motor1_enabled=False, motor2_enabled=False):
     def _sem_operation(robot, voltage, c_height, distance, etime, origin, destination, motor1_enabled, motor2_enabled, process_run_id):
@@ -1479,8 +1480,8 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination, 
                     robot.moveto(x=robot.intermediate_pos["HOME"][0])
                     robot.moveto(y=robot.intermediate_pos["HOME"][1])
                 else:
-                    broadcast(f"Delivering stub to stage: {destination}.")
-                    
+                    broadcast(f"Delivering stub to stage position: {destination}.")
+                    ''' ERROR IS HERE
                     # Move to destination position
                     robot.moveto(*robot.phenom_stub_pos[destination])
                     robot.moveto(*robot.phenom_stub_pos["PSTAGE_Z1"])
@@ -1492,7 +1493,7 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination, 
                     time.sleep(PAUSE_VAC)
                     robot.moveto(*robot.phenom_stub_pos["PSTAGE_Z2"])
                     robot.speed = SPEED_NORMAL
-
+                    '''
                     # Opening gripper
                     control_panel_gripper_home()
                     robot.speed = SPEED_NORMAL
