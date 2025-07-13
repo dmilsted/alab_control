@@ -1481,19 +1481,20 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination, 
                     robot.moveto(y=robot.intermediate_pos["HOME"][1])
                 else:
                     broadcast(f"Delivering stub to stage position: {destination}.")
-                    ''' ERROR IS HERE
                     # Move to destination position
                     robot.moveto(*robot.phenom_stub_pos[destination])
-                    robot.moveto(*robot.phenom_stub_pos["PSTAGE_Z1"])
+                    robot.moveto(*robot.phenom_stub_pos["PH_Z1"])
                     robot.speed = SPEED_LOW
-                    robot.moveto(*robot.phenom_stub_pos["PSTAGE_Z2"])
+                    robot.moveto(*robot.phenom_stub_pos["PH_Z2"])
                     robot.speed = SPEED_VLOW
-                    robot.moveto(*robot.phenom_stub_pos["PSTAGE_Z3"])
-                    control_panel_vacuum("SEM", False)
-                    time.sleep(PAUSE_VAC)
-                    robot.moveto(*robot.phenom_stub_pos["PSTAGE_Z2"])
-                    robot.speed = SPEED_NORMAL
-                    '''
+                    robot.moveto(*robot.phenom_stub_pos["PH_Z3"])
+                    #opening gripper, partially, enough to release stub
+                    control_panel_gripper_release()
+                    robot.moveto(*robot.phenom_stub_pos["PH_Z4"])
+                    #closing gripper, partially, to press stub down
+                    control_panel_gripper_press()
+                    robot.moveto(*robot.phenom_stub_pos["PH_Z5"])
+                    
                     # Opening gripper
                     control_panel_gripper_home()
                     robot.speed = SPEED_NORMAL
