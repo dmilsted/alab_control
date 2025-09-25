@@ -1467,7 +1467,9 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination, 
                 if destination == "tray":
                     broadcast(f"Delivering stub to tray: {origin}.")
                     robot.moveto(*robot.clean_stub_pos[origin])
+                    broadcast(f"ABABABABABA")
                     robot.moveto(*robot.clean_stub_pos["STRAY_Z1"])
+                    broadcast(f"EBEBEBEBEBE")
                     robot.speed = SPEED_LOW
                     robot.moveto(*robot.clean_stub_pos["STRAY_Z2"])
                     robot.speed = SPEED_VLOW
