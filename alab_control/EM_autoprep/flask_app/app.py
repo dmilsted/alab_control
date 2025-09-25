@@ -1273,7 +1273,7 @@ def sem_process_action(voltage, c_height, distance, etime, origin, destination, 
             # This is always allowed since we're returning the stub to where it came from
             print(f"SEM Tray process: Will return stub from {origin} back to {origin}")
             
-        elif origin == destination:
+        elif origin == destination: #TODO FIX THIS
             # SEM Tray process: origin and destination are the same position
             # This means "pick up stub from position X, expose it, return to position X"
             # This should be allowed - no additional validation needed
@@ -6467,3 +6467,31 @@ if __name__ == '__main__':
     
     # Run the Flask application
     socketio.run(app, host=host_ip, port=web_port, debug=True, allow_unsafe_werkzeug=True)
+
+
+#TODO
+# 1. PHLIDMV status while the cover is already moved closed or open. Expected: STANDBY
+# 2. State of the machine refers to the action before
+# 3. It shows "timeout" and "false"
+# 4. Did correctly determine stub was not picked up. The state goes to SEMSTOR
+# 5. Standby does not always go home
+# 6. tried E1, did not go to E1. The tray is inverted in the display.
+# 7. vacuum pump stays on when it fails to (maybe) communicate with the HV
+# 8. connection failed when we click prepare sample after we put the control panel back to STANDBY
+# 	after 3 times, we got this: 
+#  SEM process requested with parameters: voltage=10000, c_height=39, distance=18, time=5000, origin=E1, destination=E1, vibMotor1=true, vibMotor2=true
+# > Sending to PLC >> MACSTAT
+# > MACSTAT:STANDBY
+# > Connection failed 1 times
+# > false
+# > SEM process requested with parameters: voltage=10000, c_height=39, distance=18, time=5000, origin=E1, destination=E1, vibMotor1=true, vibMotor2=true
+# > Sending to PLC >> MACSTAT
+# > MACSTAT:STANDBY
+# > Connection failed 2 times. Attempting reset...
+# > false
+# > SEM process requested with parameters: voltage=10000, c_height=39, distance=18, time=5000, origin=E1, destination=E1, vibMotor1=true, vibMotor2=true
+# > Sending to PLC >> MACSTAT
+# > MACSTAT:STANDBY
+# > Error during homing: 'NoneType' object has no attribute 'gohome'
+
+# 9. Fails when it tries to put back the SEM stub into E1. The high voltage generator did go to 10 kV but we saw 0 current, it goes to 0 V eventually after the attracting process. It could have been just waiting to retry, but maybe not. We received "false" as the output. Vacuum did not turn off. 
